@@ -4,13 +4,16 @@
 #   Rscript tools/dataset.R <data directory> <wrong-cases output file> [--files <glob>] [--workers N]
 #
 # Each record is asked about under each grammar V8 found it valid in: the record's flags with u added (the unicode
-# answers), the record's flags alone (the legacy answers) and, in the file that has them, the flags with v added (the
+# answers), the record's flags alone (the legacy answers) and, where the record has them, the flags with v added (the
 # unicode_sets answers). R's strings are UTF-8, so a text is matched as R holds it, positions in characters; a text with
 # a lone surrogate has no UTF-8 form and is not asked about, and a lone surrogate in a pattern is read as U+FFFD. An R
 # string cannot hold a NUL character, so a text with one is not asked about, nor a pattern with one.
-# Records marked v8_deviation are left out. Any difference from V8 is a wrong answer; a refusal of a valid pattern, an
-# acceptance of an invalid one, and a match that reaches its limit are counted apart and listed too. captures.jsonl is
-# judged on exec, the global search, the sticky flag, replace and split. A match is given 2 seconds.
+# Records and tests marked v8_deviation are left out, but for those marked unicode-version, where V8 has the Unicode of
+# 16 and test262 that of 17: the package has Unicode 17, so they are judged by test262's verdicts (test262_valid) and
+# answers (test262_answer) in the grammars those name, and left out in the others. Any difference from V8 is a wrong
+# answer; a refusal of a valid pattern, an acceptance of an invalid one, and a match that reaches its limit are counted
+# apart and listed too. captures.jsonl is judged on exec, the global search, the sticky flag, replace and split. A
+# match is given 2 seconds.
 #
 # The data gives positions in UTF-16 code units. They are compared in characters from 1, an end inclusive, as the
 # package gives them: a position between the halves of a character (which a match without u or v can reach) is the
@@ -18,8 +21,9 @@
 # as U+FFFD, as the package writes a half character.
 #
 # jsonlite reads a lone surrogate escape as nothing it can keep, so each is rewritten first as the escape of a code
-# point of Plane 15's private use area (U+F0000 + its offset from U+D800), which the data does not use: a text that
-# holds one has a lone surrogate. A NUL escape is rewritten as U+F0800, so that a string with one is known.
+# point of Plane 15's private use area (U+F4000 + its offset from U+D800), which the data does not use: a text that
+# holds one has a lone surrogate. A NUL escape is rewritten as U+F4800, so that a string with one is known. A line of
+# the data that holds one of these code points stops the run, as its texts would be taken for what they are not.
 suppressPackageStartupMessages({
   library(corvusregexecma262)
   library(jsonlite)
@@ -28,9 +32,9 @@ suppressPackageStartupMessages({
 
 LIMIT <- 2
 REPLACEMENT <- "<$&|$1|$2|$10|$<a>|$$|$`|$'>"
-LONE_FIRST <- 0xF0000
-LONE_LAST <- 0xF07FF
-NUL_MARK <- 0xF0800
+LONE_FIRST <- 0xF4000
+LONE_LAST <- 0xF47FF
+NUL_MARK <- 0xF4800
 
 native <- asNamespace("corvusregexecma262")
 
@@ -38,19 +42,24 @@ native <- asNamespace("corvusregexecma262")
 surrogate_escape <- r"[\\\\|\\u(d[89ab][0-9a-f]{2})\\u(d[c-f][0-9a-f]{2})|\\u(d[89a-f][0-9a-f]{2})|\\u0000]"
 
 readable <- function(line) {
+  cps <- utf8ToInt(line)
+  if (any(cps >= LONE_FIRST & cps <= NUL_MARK)) {
+    stop("the data holds a code point this runner keeps as a mark")
+  }
   if (!grepl("\\\\u(d[89a-f]|0000)", line, perl = TRUE, ignore.case = TRUE)) {
     return(line)
   }
   m <- gregexpr(surrogate_escape, line, perl = TRUE, ignore.case = TRUE)
   tokens <- regmatches(line, m)[[1L]]
   regmatches(line, m) <- list(vapply(tokens, function(t) {
+    if (nchar(t) == 12L) {
+      cp <- 0x10000 + bitwShiftL(strtoi(substr(t, 3L, 6L), 16L) - 0xD800, 10L) + strtoi(substr(t, 9L, 12L), 16L) - 0xDC00
+      if (cp >= LONE_FIRST && cp <= NUL_MARK) stop(sprintf("the data uses U+%X, which this runner keeps as a mark", cp))
+    }
     if (nchar(t) != 6L) {
       return(t)
     }
-    if (t == "\\u0000") {
-      return("\\udb82\\udc00")
-    }
-    v <- LONE_FIRST + strtoi(substr(t, 3L, 6L), 16L) - 0xD800 - 0x10000
+    v <- if (t == "\\u0000") NUL_MARK - 0x10000 else LONE_FIRST + strtoi(substr(t, 3L, 6L), 16L) - 0xD800 - 0x10000
     sprintf("\\u%04x\\u%04x", 0xD800 + bitwShiftR(v, 10L), 0xDC00 + bitwAnd(v, 0x3FF))
   }, character(1L), USE.NAMES = FALSE))
   line
@@ -126,6 +135,13 @@ compile_or_why <- function(pattern, flags) {
   })
 }
 
+# Whether a deviation is judged by test262's answers: one of the Unicode version, which the package has as test262 has
+# it.
+by_test262 <- function(marked) identical(marked$deviation, "unicode-version")
+
+# Whether a record is left out: one marked v8_deviation that is not judged by test262's answers.
+skipped_record <- function(r) isTRUE(r$v8_deviation) && !by_test262(r)
+
 modes_of <- function(r) {
   valid <- r$valid
   out <- list(list("u", "unicode", isTRUE(valid$unicode)), list("", "legacy", isTRUE(valid$legacy)))
@@ -138,10 +154,16 @@ modes_of <- function(r) {
 judge_tests <- function(name, r, pattern, st) {
   flags <- if (is.null(r$flags)) "" else r$flags
   head_pattern <- shown(pattern)
+  # A record marked for the Unicode version is judged in the grammars test262 gives a verdict for, by it.
+  record_by_test262 <- isTRUE(r$v8_deviation) && by_test262(r)
   for (mode in modes_of(r)) {
     mode_flags <- paste0(flags, mode[[1L]])
     answer <- mode[[2L]]
     valid <- mode[[3L]]
+    if (record_by_test262) {
+      valid <- r$test262_valid[[answer]]
+      if (!is.logical(valid) || length(valid) != 1L) next
+    }
     head <- sprintf("%s\t/%s/%s", name, head_pattern, mode_flags)
     compiled <- compile_or_why(pattern, mode_flags)
     if (is.null(compiled$re)) {
@@ -157,11 +179,20 @@ judge_tests <- function(name, r, pattern, st) {
       st$w <- c(st$w, sprintf("ACCEPTED-INVALID\t%s", head))
       next
     }
-    tests <- Filter(function(t) is.logical(t[[answer]]) && length(t[[answer]]) == 1L && is.character(t$text) &&
-                      !unaskable(t$text), r$tests)
+    # A test marked for the Unicode version, or any test of a record so marked, is judged by test262's answer in this
+    # grammar, and left out where it has none. A test marked otherwise is left out.
+    expected_of <- function(t) {
+      marked <- isTRUE(t$v8_deviation)
+      if (marked && !by_test262(t)) {
+        return(NULL)
+      }
+      a <- if (marked || record_by_test262) t$test262_answer[[answer]] else t[[answer]]
+      if (is.logical(a) && length(a) == 1L && !is.na(a)) a else NULL
+    }
+    tests <- Filter(function(t) !is.null(expected_of(t)) && is.character(t$text) && !unaskable(t$text), r$tests)
     if (length(tests) == 0L) next
     texts <- vapply(tests, function(t) t$text, character(1L))
-    expected <- vapply(tests, function(t) t[[answer]], logical(1L))
+    expected <- vapply(tests, expected_of, logical(1L))
     got <- .Call(native$native_crer_first, compiled$re, texts, 1L, LIMIT, 0L)
     if (inherits(got, "crer_native_error")) {
       # A text reached its limit: each is asked alone.
@@ -305,7 +336,7 @@ judge_lines <- function(name, lines) {
   for (line in lines) {
     if (!nzchar(trimws(line))) next
     r <- parse_json(readable(line))
-    if (isTRUE(r$v8_deviation)) {
+    if (skipped_record(r)) {
       skipped <- skipped + 1L
       next
     }
