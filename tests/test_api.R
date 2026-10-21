@@ -152,4 +152,26 @@ same(ecma_replace("2026-10, 2027-01", date, "$<month>/$1"), "10/2026, 01/2027")
 same(ecma_replace("2026-10", date, function(m) m[["month"]]), "10")
 same(ecma_split("a ; b;c", "\\s*(;)\\s*"), list(c("a", ";", "b", ";", "c")))
 
+# Nested classes on a small stack: with v a class holds classes, each a level of reading. On a stack of 512 KB the
+# deepest nesting allowed is read, compiled and matched, and deeper is refused as too large, rather than overflowing
+# the stack, which ends the process (as with the crate up to 0.1.1). R runs on the main thread, so a child is started
+# with ulimit -s; there is no ulimit on Windows.
+if (.Platform$OS.type == "unix") {
+  script <- tempfile(fileext = ".R")
+  writeLines(c(
+    "library(corvusregexecma262)",
+    "nest <- function(depth) paste0(strrep('[', depth), 'a', strrep(']', depth))",
+    "refused <- vapply(c(nest(1001L), strrep('[', 200000L)), function(p) tryCatch({",
+    "  ecma_regex(p, 'v')",
+    "  'compiled'",
+    "}, ecma_pattern_too_large = function(e) 'too large'), '')",
+    "cat(ecma_test('a', ecma_regex(nest(1000L), 'v')), unname(refused))"
+  ), script)
+  rscript <- shQuote(file.path(R.home("bin"), "Rscript"))
+  command <- sprintf("ulimit -s 512 && exec %s %s", rscript, shQuote(script))
+  libs <- paste0("R_LIBS=", shQuote(paste(.libPaths(), collapse = .Platform$path.sep)))
+  out <- suppressWarnings(system2("sh", c("-c", shQuote(command)), stdout = TRUE, stderr = TRUE, env = libs))
+  same(out, "TRUE too large too large")
+}
+
 cat("all API checks passed\n")
