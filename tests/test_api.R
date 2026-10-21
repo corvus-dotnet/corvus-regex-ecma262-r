@@ -170,7 +170,8 @@ if (.Platform$OS.type == "unix") {
   rscript <- shQuote(file.path(R.home("bin"), "Rscript"))
   command <- sprintf("ulimit -s 512 && exec %s %s", rscript, shQuote(script))
   libs <- paste0("R_LIBS=", shQuote(paste(.libPaths(), collapse = .Platform$path.sep)))
-  out <- suppressWarnings(system2("sh", c("-c", shQuote(command)), stdout = TRUE, stderr = TRUE, env = libs))
+  # The answer is on stdout; R may write warnings of its own start to stderr (under R CMD check it does).
+  out <- suppressWarnings(system2("sh", c("-c", shQuote(command)), stdout = TRUE, stderr = FALSE, env = libs))
   same(out, "TRUE too large too large")
 }
 
