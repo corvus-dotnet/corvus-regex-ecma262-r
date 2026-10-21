@@ -1,0 +1,20 @@
+Package: corvusregexecma262
+Title: 'ECMA-262' ('JavaScript') Regular Expressions
+Version: 0.1.1
+Authors@R: c(
+    person("Matthew", "Adams", email = "matthew.adams@endjin.com", role = c("aut", "cre")),
+    person("Endjin Limited", role = c("cph", "fnd")))
+Description: Regular expressions with the grammar and the answers of 'ECMA-262',
+    the 'RegExp' of 'JavaScript': every flag, lookbehind, named groups, modifier
+    groups and the Unicode properties, so that a pattern answers in R as it does
+    in a browser or 'Node.js'. Test, match, locate, count, replace and split over
+    character vectors. A pattern without a backreference is matched in time
+    proportional to its size times the text. The engine is the
+    'corvus-regex-ecma262' 'Rust' crate.
+License: Apache License (>= 2)
+URL: https://github.com/corvus-dotnet/corvus-regex-ecma262-r
+BugReports: https://github.com/corvus-dotnet/corvus-regex-ecma262-r/issues
+Depends: R (>= 4.2)
+SystemRequirements: Cargo (Rust's package manager), rustc (>= 1.89)
+Encoding: UTF-8
+NeedsCompilation: yes

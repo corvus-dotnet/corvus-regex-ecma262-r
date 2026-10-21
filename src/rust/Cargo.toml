@@ -1,0 +1,21 @@
+[package]
+name = "corvusregexecma262"
+version = "0.1.1"
+edition = "2024"
+rust-version = "1.89"
+description = "The native code of the corvusregexecma262 R package: the corvus-regex-ecma262 crate over R's strings."
+license = "Apache-2.0"
+publish = false
+
+[lib]
+crate-type = ["staticlib"]
+
+[dependencies]
+corvus-regex-ecma262 = "0.1.1"
+simdutf8 = "0.1.5"
+
+[profile.release]
+opt-level = 3
+lto = true
+codegen-units = 1
+panic = "unwind"

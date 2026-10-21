@@ -1,0 +1,17 @@
+useDynLib(corvusregexecma262, .registration = TRUE, .fixes = "native_")
+
+export(ecma_regex)
+export(ecma_valid)
+export(ecma_test)
+export(ecma_match)
+export(ecma_locate)
+export(ecma_match_all)
+export(ecma_locate_all)
+export(ecma_count)
+export(ecma_replace)
+export(ecma_replace_all)
+export(ecma_split)
+export(ecma_version)
+
+S3method(print, ecma_regex)
+S3method(format, ecma_regex)

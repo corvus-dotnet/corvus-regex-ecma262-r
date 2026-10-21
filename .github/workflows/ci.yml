@@ -1,0 +1,141 @@
+# Lint the native code; R CMD check the package on Linux, macOS and Windows, at the oldest R it supports, the current
+# release and (on Linux) R-devel; and run the ECMA-262 test data through it on Linux. The data is pinned to a commit;
+# the pass is 0 wrong answers, 0 refusals of a valid pattern, 0 acceptances of an invalid one and 0 matches at their
+# limit.
+name: ci
+on:
+  push:
+    branches:
+    - main
+  pull_request:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.event_name == 'pull_request' && github.event.pull_request.number || github.sha }}
+  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
+
+jobs:
+  lint:
+    name: Lint
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: src/rust
+    steps:
+    - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
+      with:
+        persist-credentials: false
+    - name: Toolchain
+      # Pinned: clippy's lints change between releases.
+      run: |
+        rustup toolchain install 1.98.0 --profile minimal --component clippy,rustfmt
+        rustup default 1.98.0
+    - name: Format, lint and test
+      run: |
+        cargo fmt --check
+        cargo clippy --all-targets --locked -- -D warnings
+        cargo test --locked
+    - name: Minimum Rust version
+      # The package's rust-version (and the rustc in its SystemRequirements) must be a toolchain it builds with.
+      run: |
+        minimum=$(sed -n 's/^rust-version = "\(.*\)"$/\1/p' Cargo.toml)
+        grep -q "rustc (>= $minimum)" ../../DESCRIPTION \
+          || { echo "::error::DESCRIPTION's SystemRequirements does not name rustc (>= $minimum)."; exit 1; }
+        rustup toolchain install "$minimum" --profile minimal
+        cargo "+$minimum" check --lib --locked
+
+  check:
+    name: R CMD check (${{ matrix.os }}, R ${{ matrix.r }})
+    runs-on: ${{ matrix.os }}
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-latest, macos-latest, windows-latest]
+        # The minimum the package supports, and the current release.
+        r: ['4.2', 'release']
+        include:
+        - os: ubuntu-latest
+          r: 'devel'
+    env:
+      R_KEEP_PKG_SOURCE: yes
+    steps:
+    - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
+      with:
+        persist-credentials: false
+    - name: Setup R
+      uses: r-lib/actions/setup-r@f9a764fea8d5c63df6ef9a5c7795bf7deb5d7e05 # v2.14.0
+      with:
+        r-version: ${{ matrix.r }}
+        use-public-rspm: true
+    - name: Setup Rust
+      # R's toolchain on Windows (Rtools) links the GNU target.
+      shell: bash
+      run: |
+        rustup toolchain install stable --profile minimal
+        rustup default stable
+        if [ "$RUNNER_OS" = Windows ]; then rustup target add x86_64-pc-windows-gnu; fi
+        cargo --version
+    - name: Build
+      shell: bash
+      run: R CMD build .
+    - name: Check
+      # A warning fails the job as an error does. A note does not.
+      shell: bash
+      run: |
+        R CMD check --no-manual corvusregexecma262_*.tar.gz
+        # One warning is let through. The linker of R 4.2's toolchain on Windows (Rtools42, binutils 2.38) does not
+        # know a directive that current Rust compilers write into object files, and says "corrupt .drectve at end of
+        # def file" for each. It links them correctly all the same, as the tests that follow show. Later toolchains
+        # do not warn.
+        log=corvusregexecma262.Rcheck/00check.log
+        warnings=$(grep -c "\.\.\. WARNING$" "$log" || true)
+        drectve=$(grep -c "Warning: corrupt .drectve at end of def file" "$log" || true)
+        others=$(grep -c "^  Warning: " "$log" || true)
+        if [ "$warnings" -gt 1 ] || { [ "$warnings" -eq 1 ] && { [ "$drectve" -eq 0 ] || [ "$others" -ne "$drectve" ]; }; }; then
+          echo "::error::R CMD check gave a warning."
+          exit 1
+        fi
+        grep -h "all API checks passed" corvusregexecma262.Rcheck/tests/test_api.Rout \
+          || { echo "::error::The API tests did not run."; exit 1; }
+    - name: Upload the check's logs
+      if: failure()
+      uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+      with:
+        name: check-${{ matrix.os }}-r${{ matrix.r }}
+        path: |
+          corvusregexecma262.Rcheck/00check.log
+          corvusregexecma262.Rcheck/00install.out
+          corvusregexecma262.Rcheck/tests/*.Rout*
+
+  dataset:
+    name: The ECMA-262 test data
+    runs-on: ubuntu-latest
+    steps:
+    - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
+      with:
+        persist-credentials: false
+    - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
+      with:
+        repository: corvus-dotnet/ecma262-regex-test-data
+        ref: 41ed6db477c0d57192673a3a1a76a3b7a194603b
+        path: ecma262-regex-test-data
+        persist-credentials: false
+    - name: Setup R
+      uses: r-lib/actions/setup-r@f9a764fea8d5c63df6ef9a5c7795bf7deb5d7e05 # v2.14.0
+      with:
+        use-public-rspm: true
+    - name: Install the package and jsonlite
+      run: |
+        Rscript -e 'install.packages("jsonlite")'
+        MAKEFLAGS=-j4 R CMD INSTALL .
+    - name: Run the ECMA-262 test data
+      run: Rscript tools/dataset.R ecma262-regex-test-data/data wrong-cases.tsv
+    - name: Keep the wrong cases
+      if: failure()
+      uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+      with:
+        name: wrong-cases
+        path: wrong-cases.tsv

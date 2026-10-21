@@ -1,0 +1,5 @@
+src/rust/target
+src/rust/.cargo-home
+*.Rcheck
+*.tar.gz
+.git
