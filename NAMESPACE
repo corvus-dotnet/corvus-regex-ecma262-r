@@ -1,6 +1,8 @@
 useDynLib(corvusregexecma262, .registration = TRUE, .fixes = "native_")
 
 export(ecma_regex)
+export(ecma_set_default_timeout)
+export(ecma_default_timeout)
 export(ecma_valid)
 export(ecma_test)
 export(ecma_match)

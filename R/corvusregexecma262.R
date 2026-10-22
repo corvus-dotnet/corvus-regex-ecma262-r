@@ -32,14 +32,24 @@ checked <- function(value, call = sys.call(-1L)) {
   invisible()
 }
 
-ecma_regex <- function(pattern, flags = "") {
+ecma_regex <- function(pattern, flags = "", timeout = NULL) {
   if (inherits(pattern, "ecma_regex")) {
     return(pattern)
   }
-  ptr <- checked(.Call(native_crer_compile, pattern, flags))
+  ptr <- checked(.Call(native_crer_compile, pattern, flags, timeout_of(timeout)))
   info <- .Call(native_crer_info, ptr)
   structure(ptr, source = info[[1L]], flags = info[[2L]], group_count = info[[3L]], group_names = info[[4L]],
-            class = "ecma_regex")
+            timeout = if (is.na(info[[5L]])) NULL else info[[5L]], class = "ecma_regex")
+}
+
+ecma_set_default_timeout <- function(seconds) {
+  checked(.Call(native_crer_set_default_timeout, timeout_of(seconds)))
+  invisible()
+}
+
+ecma_default_timeout <- function() {
+  t <- .Call(native_crer_default_timeout)
+  if (is.na(t)) NULL else t
 }
 
 ecma_valid <- function(pattern, flags = "") {

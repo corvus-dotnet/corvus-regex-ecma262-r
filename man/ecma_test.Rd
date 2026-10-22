@@ -20,7 +20,8 @@ ecma_locate(x, regex, group = 0L, start = 1L, timeout = NULL)
 \item{regex}{A regular expression from \code{\link{ecma_regex}}, or a pattern compiled without flags.}
 \item{start}{Where each search starts, in characters from 1 (recycled), as \code{lastIndex} sets it: with the
   \code{y} flag a match must start there.}
-\item{timeout}{A limit, in seconds, on the time each match may take, or \code{NULL} for none.}
+\item{timeout}{A limit in seconds on the time this match may take in place of the pattern's timeout (\code{0} for
+none), or \code{NULL} for the pattern's.}
 \item{group}{The group to locate, by number (0 is the whole match) or by name.}
 }
 \value{
@@ -31,7 +32,8 @@ match ends one character before it starts. There is \code{NA} for an \code{NA} s
 not match, and for a group that did not take part.
 }
 \section{Limits}{
-A match that reaches \code{timeout}, or the cap on backtracking memory, raises \code{ecma_match_limit}. A pattern
+A match that reaches the pattern's timeout (see \code{\link{ecma_regex}}) or \code{timeout}, or the cap on
+backtracking memory, raises \code{ecma_match_limit}. A pattern
 without a backreference is matched in time proportional to its size times the text.
 }
 \examples{
