@@ -18,8 +18,11 @@
 # as U+FFFD, as the package writes a half character.
 #
 # jsonlite reads a lone surrogate escape as nothing it can keep, so each is rewritten first as the escape of a code
-# point of Plane 15's private use area (U+F0000 + its offset from U+D800), which the data does not use: a text that
-# holds one has a lone surrogate. A NUL escape is rewritten as U+F0800, so that a string with one is known.
+# point of a block of private use code points (the block's first + its offset from U+D800), and a NUL escape as the
+# code point after those 2,048, so that a string with either is known. The block is chosen for each line from the
+# blocks of Planes 15 and 16: the first whose code points the line does not hold, which is known when the line, read
+# with that block, holds as many of them as it had escapes rewritten. So no character of the data is taken for a lone
+# surrogate or a NUL (test262's texts hold the ends of the private use ranges).
 suppressPackageStartupMessages({
   library(corvusregexecma262)
   library(jsonlite)
@@ -28,42 +31,70 @@ suppressPackageStartupMessages({
 
 LIMIT <- 2
 REPLACEMENT <- "<$&|$1|$2|$10|$<a>|$$|$`|$'>"
-LONE_FIRST <- 0xF0000
-LONE_LAST <- 0xF07FF
-NUL_MARK <- 0xF0800
+# The first code point of each block a line's lone surrogates and NULs may be read as, and the block of the line being
+# judged (set by read_record).
+BLOCKS <- c(seq(0xF0000, 0xFE000, by = 0x1000), seq(0x100000, 0x10E000, by = 0x1000))
+marks <- new.env()
+marks$first <- 0xF0000
 
 native <- asNamespace("corvusregexecma262")
 
 # An escaped backslash, a surrogate pair's escapes, a lone surrogate's escape, or a NUL's.
 surrogate_escape <- r"[\\\\|\\u(d[89ab][0-9a-f]{2})\\u(d[c-f][0-9a-f]{2})|\\u(d[89a-f][0-9a-f]{2})|\\u0000]"
 
-readable <- function(line) {
+# The line with each lone surrogate escape and NUL escape rewritten for a block, and how many were.
+rewrite <- function(line, block) {
   if (!grepl("\\\\u(d[89a-f]|0000)", line, perl = TRUE, ignore.case = TRUE)) {
-    return(line)
+    return(list(line = line, written = 0L))
   }
   m <- gregexpr(surrogate_escape, line, perl = TRUE, ignore.case = TRUE)
   tokens <- regmatches(line, m)[[1L]]
+  written <- 0L
   regmatches(line, m) <- list(vapply(tokens, function(t) {
     if (nchar(t) != 6L) {
       return(t)
     }
-    if (t == "\\u0000") {
-      return("\\udb82\\udc00")
-    }
-    v <- LONE_FIRST + strtoi(substr(t, 3L, 6L), 16L) - 0xD800 - 0x10000
+    written <<- written + 1L
+    v <- if (t == "\\u0000") block + 0x800 - 0x10000 else block + strtoi(substr(t, 3L, 6L), 16L) - 0xD800 - 0x10000
     sprintf("\\u%04x\\u%04x", 0xD800 + bitwShiftR(v, 10L), 0xDC00 + bitwAnd(v, 0x3FF))
   }, character(1L), USE.NAMES = FALSE))
-  line
+  list(line = line, written = written)
 }
 
-is_lone <- function(cps) cps >= LONE_FIRST & cps <= LONE_LAST
+# How many code points of a block (its 2,048 and the NUL's after them) the strings of a value hold.
+count_in <- function(value, block) {
+  if (is.character(value)) {
+    sum(vapply(value, function(s) sum((cps <- utf8ToInt(s)) >= block & cps <= block + 0x800), numeric(1L)))
+  } else if (is.list(value)) {
+    sum(vapply(value, count_in, numeric(1L), block = block)) + if (is.null(names(value))) 0 else count_in(names(value), block)
+  } else {
+    0
+  }
+}
+
+# The record of a line, its lone surrogates and NULs read as code points of the first block the line does not use.
+read_record <- function(line) {
+  for (block in BLOCKS) {
+    rw <- rewrite(line, block)
+    r <- parse_json(rw$line)
+    if (count_in(r, block) == rw$written) {
+      marks$first <- block
+      return(r)
+    }
+  }
+  stop("every block of Planes 15 and 16 is used by the line")
+}
+
+is_lone <- function(cps) cps >= marks$first & cps <= marks$first + 0x7FF
+
+is_nul <- function(cps) cps == marks$first + 0x800
 
 lone <- function(s) any(is_lone(utf8ToInt(s)))
 
 # Whether a string has no R form: a lone surrogate, or a NUL.
 unaskable <- function(s) {
   cps <- utf8ToInt(s)
-  any(is_lone(cps) | cps == NUL_MARK)
+  any(is_lone(cps) | is_nul(cps))
 }
 
 # UTF-8, a lone surrogate as U+FFFD (as String::from_utf16_lossy writes it).
@@ -82,7 +113,7 @@ units <- function(s) {
   out <- integer(0L)
   for (c in cps) {
     out <- c(out, if (is_lone(c)) {
-      0xD800 + c - LONE_FIRST
+      0xD800 + c - marks$first
     } else if (c > 0xFFFF) {
       c(0xD800 + bitwShiftR(c - 0x10000, 10L), 0xDC00 + bitwAnd(c - 0x10000, 0x3FF))
     } else {
@@ -304,13 +335,13 @@ judge_lines <- function(name, lines) {
   skipped <- 0L
   for (line in lines) {
     if (!nzchar(trimws(line))) next
-    r <- parse_json(readable(line))
+    r <- read_record(line)
     if (isTRUE(r$v8_deviation)) {
       skipped <- skipped + 1L
       next
     }
     records <- records + 1L
-    if (!is.character(r$pattern) || any(utf8ToInt(r$pattern) == NUL_MARK)) next
+    if (!is.character(r$pattern) || any(is_nul(utf8ToInt(r$pattern)))) next
     if (name == "captures.jsonl") judge_captures(r, r$pattern, st) else judge_tests(name, r, r$pattern, st)
   }
   list(c = st$c, w = st$w, records = records, skipped = skipped)
