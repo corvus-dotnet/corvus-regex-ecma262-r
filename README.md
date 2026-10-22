@@ -18,10 +18,10 @@ Regular expressions with the grammar and the answers of ECMA-262, the `RegExp` o
   searches take a timeout, so neither a pattern nor a text from outside can make a program hang.
 
 **Compliance.** Over the [ECMA-262 test data](https://github.com/corvus-dotnet/ecma262-regex-test-data) (what V8 says
-about 109,547 patterns and 5,325,026 texts, `exec`, the global search, `replace` and `split` among them), through this
-package, it gives 12,094,470 right answers and none wrong, refuses no valid pattern, accepts no invalid one and
-reaches no limit. R's strings are UTF-8, so that is every answer about a text and a pattern an R string can hold: the
-data's texts with a lone surrogate or a NUL character have no R form. CI runs the whole data.
+about 117,889 patterns and 5,884,566 texts, test262's and `exec`, the global search, `replace` and `split` among
+them), through this package, it gives 13,720,533 right answers and none wrong, refuses no valid pattern, accepts no
+invalid one and reaches no limit. R's strings are UTF-8, so that is every answer about a text and a pattern an R
+string can hold: the data's texts with a lone surrogate or a NUL character have no R form. CI runs the whole data.
 
 ## Install
 
