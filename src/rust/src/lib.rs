@@ -284,25 +284,25 @@ fn first(
         return Ok(false);
     }
     let caps = match limit {
-        Some(l) => c.re.try_captures_at(s, start, l).map_err(limit_failure)?,
+        Some(l) => c.re.captures_at_within(s, start, l),
         None => c.re.captures_at(s, start),
     };
-    Ok(caps.map(|caps| spans_of(c, &caps, out)).is_some())
+    Ok(caps.map_err(limit_failure)?.map(|caps| spans_of(c, &caps, out)).is_some())
 }
 
 /// Every match of a global search, the groups of each appended to `out` (only the match's when `whole`): how many.
-fn all(c: &Compiled, s: &str, whole: bool, out: &mut Vec<Option<(usize, usize)>>) -> usize {
+fn all(c: &Compiled, s: &str, whole: bool, out: &mut Vec<Option<(usize, usize)>>) -> Result<usize> {
     let groups = c.re.captures_len();
     if whole || (groups == 1 && c.names.is_empty()) {
         let mut it = c.re.find_iter(s);
         let mut batch = [(0usize, 0usize); 256];
         let mut n = 0;
         loop {
-            let k = it.next_batch(&mut batch);
+            let k = it.next_batch(&mut batch).map_err(limit_failure)?;
             out.extend(batch[..k].iter().map(|&(a, b)| Some((a, b))));
             n += k;
             if k < batch.len() {
-                return n;
+                return Ok(n);
             }
         }
     }
@@ -311,32 +311,32 @@ fn all(c: &Compiled, s: &str, whole: bool, out: &mut Vec<Option<(usize, usize)>>
         let mut batch = vec![None; groups * 64];
         let mut n = 0;
         loop {
-            let k = it.next_batch(&mut batch);
+            let k = it.next_batch(&mut batch).map_err(limit_failure)?;
             out.extend_from_slice(&batch[..k * groups]);
             n += k;
             if k < 64 {
-                return n;
+                return Ok(n);
             }
         }
     }
     let mut n = 0;
     for caps in c.re.captures_iter(s) {
-        spans_of(c, &caps, out);
+        spans_of(c, &caps.map_err(limit_failure)?, out);
         n += 1;
     }
-    n
+    Ok(n)
 }
 
 /// How many matches a global search finds, none of them made.
-fn count(c: &Compiled, s: &str) -> usize {
+fn count(c: &Compiled, s: &str) -> Result<usize> {
     let mut it = c.re.find_iter(s);
     let mut batch = [(0usize, 0usize); 256];
     let mut n = 0;
     loop {
-        let k = it.next_batch(&mut batch);
+        let k = it.next_batch(&mut batch).map_err(limit_failure)?;
         n += k;
         if k < batch.len() {
-            return n;
+            return Ok(n);
         }
     }
 }
@@ -395,12 +395,12 @@ fn ecma_version() -> &'static str {
     ""
 }
 
-/// Compiles a pattern: an external pointer, or a failure.
+/// Compiles a pattern with a timeout in seconds (0 for none, NA for the default): an external pointer, or a failure.
 ///
 /// # Safety
 /// The arguments are live R values.
 #[unsafe(no_mangle)]
-pub unsafe extern "C" fn crer_compile(pattern: SEXP, flags: SEXP) -> SEXP {
+pub unsafe extern "C" fn crer_compile(pattern: SEXP, flags: SEXP, timeout: SEXP) -> SEXP {
     entry(|| unsafe {
         check_strings(pattern, "pattern")?;
         check_strings(flags, "flags")?;
@@ -410,7 +410,11 @@ pub unsafe extern "C" fn crer_compile(pattern: SEXP, flags: SEXP) -> SEXP {
         let (Some(p), Some(f)) = (text_of(STRING_ELT(pattern, 0))?, text_of(STRING_ELT(flags, 0))?) else {
             return Err(Failure::new("argument", "pattern and flags must not be NA"));
         };
-        let re = ecma::Regex::new(p, f).map_err(compile_failure)?;
+        let re = match limit_of(REAL_ELT(timeout, 0))? {
+            None => ecma::Regex::new(p, f),
+            Some(t) => ecma::Flags::parse(f).and_then(|f| ecma::Regex::with_timeout(p, f, Some(t))),
+        }
+        .map_err(compile_failure)?;
         let names = re.group_names().map(String::from).collect();
         let ptr = Rf_protect(R_MakeExternalPtr(
             Box::into_raw(Box::new(Compiled { re, names })) as *mut c_void,
@@ -423,7 +427,26 @@ pub unsafe extern "C" fn crer_compile(pattern: SEXP, flags: SEXP) -> SEXP {
     })
 }
 
-/// What a compiled pattern is: list(source, flags, group count, names).
+/// Sets the timeout in seconds of every pattern compiled from now on without one (0 or NA for none): NULL, or a
+/// failure.
+///
+/// # Safety
+/// The argument is a live R value.
+#[unsafe(no_mangle)]
+pub unsafe extern "C" fn crer_set_default_timeout(seconds: SEXP) -> SEXP {
+    entry(|| unsafe {
+        ecma::set_default_match_timeout(limit_of(REAL_ELT(seconds, 0))?);
+        Ok(nil())
+    })
+}
+
+/// The timeout in seconds of a pattern compiled now without one: a number, NA for none.
+#[unsafe(no_mangle)]
+pub extern "C" fn crer_default_timeout() -> SEXP {
+    unsafe { Rf_ScalarReal(ecma::default_match_timeout().map_or(na_real(), |t| t.as_secs_f64())) }
+}
+
+/// What a compiled pattern is: list(source, flags, group count, names, timeout (NA for none)).
 ///
 /// # Safety
 /// The arguments are live R values.
@@ -431,7 +454,7 @@ pub unsafe extern "C" fn crer_compile(pattern: SEXP, flags: SEXP) -> SEXP {
 pub unsafe extern "C" fn crer_info(re: SEXP) -> SEXP {
     entry(|| unsafe {
         let c = compiled(re)?;
-        let list = Rf_protect(Rf_allocVector(VECSXP as c_uint, 4));
+        let list = Rf_protect(Rf_allocVector(VECSXP as c_uint, 5));
         SET_VECTOR_ELT(list, 0, string_vector(&[c.re.as_str()]));
         SET_VECTOR_ELT(list, 1, string_vector(&[&c.re.flags().to_string()]));
         let groups = Rf_allocVector(INTSXP as c_uint, 1);
@@ -439,6 +462,7 @@ pub unsafe extern "C" fn crer_info(re: SEXP) -> SEXP {
         *INTEGER(groups) = (c.re.captures_len() - 1) as c_int;
         let names: Vec<&str> = c.names.iter().map(String::as_str).collect();
         SET_VECTOR_ELT(list, 3, string_vector(&names));
+        SET_VECTOR_ELT(list, 4, Rf_ScalarReal(c.re.match_timeout().map_or(na_real(), |t| t.as_secs_f64())));
         Rf_unprotect(1);
         Ok(list)
     })
@@ -568,9 +592,9 @@ pub unsafe extern "C" fn crer_all(re: SEXP, x: SEXP, mode: SEXP) -> SEXP {
                 let Some(s) = text_of(STRING_ELT(x, i))? else { continue };
                 spans.clear();
                 if mode == 2 {
-                    all(c, s, true, &mut spans);
+                    all(c, s, true, &mut spans)?;
                 } else {
-                    all_with_names(c, s, &mut spans);
+                    all_with_names(c, s, &mut spans)?;
                 }
                 if mode == 1 {
                     let v = Rf_allocVector(STRSXP as c_uint, spans.len() as R_xlen_t);
@@ -612,7 +636,7 @@ pub unsafe extern "C" fn crer_count(re: SEXP, x: SEXP) -> SEXP {
         let result = (|| {
             for i in 0..n {
                 *o.offset(i) = match text_of(STRING_ELT(x, i))? {
-                    Some(s) => c_int::try_from(count(c, s)).unwrap_or(NA_INTEGER),
+                    Some(s) => c_int::try_from(count(c, s)?).unwrap_or(NA_INTEGER),
                     None => NA_INTEGER,
                 };
             }
@@ -646,6 +670,7 @@ pub unsafe extern "C" fn crer_replace(re: SEXP, x: SEXP, template: SEXP, all: SE
                 let v = match (text_of(STRING_ELT(x, i))?, text_of(element(template, i))?) {
                     (Some(s), Some(t)) => {
                         let r = if every { c.re.replace_all(s, t) } else { c.re.replace(s, t) };
+                        let r = r.map_err(limit_failure)?;
                         if matches!(r, Cow::Borrowed(_)) { STRING_ELT(x, i) } else { mk_char(&r) }
                     }
                     _ => na_string(),
@@ -680,7 +705,7 @@ pub unsafe extern "C" fn crer_pieces(re: SEXP, x: SEXP, all: SEXP) -> SEXP {
                 let Some(s) = text_of(STRING_ELT(x, i))? else { continue };
                 spans.clear();
                 let k = if every {
-                    all_with_names(c, s, &mut spans)
+                    all_with_names(c, s, &mut spans)?
                 } else {
                     // replace without g starts at 0 whatever lastIndex is, but a sticky pattern must match there.
                     first(c, s, 0, None, &mut spans)? as usize
@@ -710,16 +735,16 @@ pub unsafe extern "C" fn crer_pieces(re: SEXP, x: SEXP, all: SEXP) -> SEXP {
 }
 
 /// Every match with its groups and names, `width` entries each: how many.
-fn all_with_names(c: &Compiled, s: &str, out: &mut Vec<Option<(usize, usize)>>) -> usize {
+fn all_with_names(c: &Compiled, s: &str, out: &mut Vec<Option<(usize, usize)>>) -> Result<usize> {
     if c.names.is_empty() {
         return all(c, s, false, out);
     }
     let mut n = 0;
     for caps in c.re.captures_iter(s) {
-        spans_of(c, &caps, out);
+        spans_of(c, &caps.map_err(limit_failure)?, out);
         n += 1;
     }
-    n
+    Ok(n)
 }
 
 /// Each string split around the matches (`String.prototype.split`), with at most `limit` pieces (NA for none): a
@@ -739,6 +764,7 @@ pub unsafe extern "C" fn crer_split(re: SEXP, x: SEXP, limit: SEXP) -> SEXP {
             for i in 0..n {
                 let Some(s) = text_of(STRING_ELT(x, i))? else { continue };
                 let parts = if limit == NA_INTEGER { c.re.split(s) } else { c.re.splitn(s, limit.max(0) as usize) };
+                let parts = parts.map_err(limit_failure)?;
                 let v = Rf_allocVector(STRSXP as c_uint, parts.len() as R_xlen_t);
                 SET_VECTOR_ELT(out, i, v);
                 for (j, p) in parts.iter().enumerate() {

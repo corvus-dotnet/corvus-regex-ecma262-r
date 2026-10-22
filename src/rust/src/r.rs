@@ -32,6 +32,11 @@ pub const CE_BYTES: c_int = 3;
 /// `NA_integer_` and `NA` in a logical vector.
 pub const NA_INTEGER: c_int = c_int::MIN;
 
+/// `NA_real_`: a NaN with the payload 1954, which R's library holds as data and the Rust code does not import.
+pub fn na_real() -> c_double {
+    f64::from_bits(0x7FF0_0000_0000_07A2)
+}
+
 unsafe extern "C" {
     pub fn TYPEOF(x: SEXP) -> c_int;
     pub fn LENGTH(x: SEXP) -> c_int;
@@ -43,6 +48,7 @@ unsafe extern "C" {
     pub fn LOGICAL_ELT(x: SEXP, i: R_xlen_t) -> c_int;
     pub fn INTEGER_ELT(x: SEXP, i: R_xlen_t) -> c_int;
     pub fn REAL_ELT(x: SEXP, i: R_xlen_t) -> c_double;
+    pub fn Rf_ScalarReal(x: c_double) -> SEXP;
     pub fn STRING_ELT(x: SEXP, i: R_xlen_t) -> SEXP;
     pub fn SET_STRING_ELT(x: SEXP, i: R_xlen_t, v: SEXP);
     pub fn SET_VECTOR_ELT(x: SEXP, i: R_xlen_t, v: SEXP) -> SEXP;
