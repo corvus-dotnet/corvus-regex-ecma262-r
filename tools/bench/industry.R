@@ -243,7 +243,8 @@ main <- function(args) {
       n <- line$count
       entry <- list(median = round(m, 1), min = min(each), max = max(each), count = n, rounds = length(each),
                     spread = round(spread, 4), each = I(each))
-      oracle <- figures[["v8"]][[key]]$line$count
+      # Without V8 in the run (V8=0), its count as the workloads carry it (v8Count, from the central run).
+      oracle <- if (!is.null(figures[["v8"]])) figures[["v8"]][[key]]$line$count else workloads[[k + 1L]]$v8Count
       if (!is.null(oracle) && n != oracle && e != "v8") {
         differ <- c(differ, sprintf("%s %s %d vs V8 %d", e, wid, n, oracle))
         message(sprintf("COUNT  %-13s %-62s %d against V8's %d", e, wid, n, oracle))
