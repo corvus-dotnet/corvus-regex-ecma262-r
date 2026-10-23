@@ -21,9 +21,9 @@ Regular expressions with the grammar and the answers of ECMA-262, the `RegExp` o
   too, so with a timeout neither a pattern nor a text from outside can make a program hang.
 
 **Compliance.** Over the [ECMA-262 test data](https://github.com/corvus-dotnet/ecma262-regex-test-data) (what V8 says
-about 117,889 patterns and 5,884,566 texts, test262's and `exec`, the global search, `replace` and `split` among them,
+about 123,087 patterns and 6,056,699 texts, test262's and `exec`, the global search, `replace` and `split` among them,
 and texts of bytes that are not UTF-8, which it refuses), through this package over R's strings, raw vectors and
-`ecma_utf16` code units, it gives 26,953,709 right answers, every answer the data asks, and none wrong, refuses no valid
+`ecma_utf16` code units, it gives 29,289,554 right answers, every answer the data asks, and none wrong, refuses no valid
 pattern, accepts no invalid one and reaches no limit. CI runs the whole data. (A text with a NUL, which an R string
 cannot hold, is asked as a raw vector, and the answers over UTF-16 as code units.)
 
