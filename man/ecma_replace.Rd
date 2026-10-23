@@ -12,16 +12,21 @@ ecma_replace(x, regex, replacement)
 ecma_replace_all(x, regex, replacement)
 }
 \arguments{
-\item{x}{A character vector.}
+\item{x}{A character vector, or texts in another form: a raw vector of UTF-8 or an \code{ecma_utf16} of code units,
+  or a list of them (see \code{\link{ecma_utf16}}).}
 \item{regex}{A regular expression from \code{\link{ecma_regex}}, or a pattern compiled without flags.}
 \item{replacement}{A character vector of templates (recycled), or a function. In a template, \verb{$&} is the match,
   \verb{$`} and \verb{$'} the text before and after it, \code{$1} to \code{$99} a group, \code{$<name>} a named group,
   and \code{$$} a dollar sign; anything else is itself. A function is called with each match's row, as
-  \code{\link{ecma_match}} lays it out (a named character vector), and returns one string.}
+  \code{\link{ecma_match}} lays it out (a named character vector), and returns one string. For texts in another
+  form a template may also be a raw vector or an \code{ecma_utf16} (or a list of them), and a function is given a
+  named list of texts in the form of the one matched and returns one string or one such text.}
 }
 \value{
 A character vector, \code{NA} where the string or its template is \code{NA}. A match that takes half of a character
-leaves the other half as U+FFFD.
+leaves the other half as U+FFFD. For a list of texts, a list of texts in the form of each (\code{NULL} where the text
+is), and for a raw vector or an \code{ecma_utf16} alone, one text in its form; an \code{ecma_utf16} keeps lone
+surrogates as they are.
 }
 \examples{
 date <- ecma_regex("(?<year>\\\\d{4})-(?<month>\\\\d{2})", "g")

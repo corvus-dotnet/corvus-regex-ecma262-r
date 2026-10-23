@@ -1,6 +1,6 @@
 [package]
 name = "corvusregexecma262"
-version = "0.2.0"
+version = "0.2.1"
 edition = "2024"
 rust-version = "1.89"
 description = "The native code of the corvusregexecma262 R package: the corvus-regex-ecma262 crate over R's strings."

@@ -5,18 +5,21 @@
 #
 # Each record is asked about under each grammar V8 found it valid in: the record's flags with u added (the unicode
 # answers), the record's flags alone (the legacy answers) and, in the file that has them, the flags with v added (the
-# unicode_sets answers). R's strings are UTF-8, so a text is matched as R holds it, positions in characters; a text with
-# a lone surrogate has no UTF-8 form and is not asked about, and a lone surrogate in a pattern is read as U+FFFD. An R
-# string cannot hold a NUL character, so a text with one is not asked about, nor a pattern with one.
-# Records marked v8_deviation are left out. Any difference from V8 is a wrong answer; a refusal of a valid pattern, an
-# acceptance of an invalid one, and a match that reaches its limit are counted apart and listed too. captures.jsonl is
-# judged on exec, the global search, the sticky flag, replace and replaceAll, the answers the data's rule asks over
-# UTF-8 (split is asked over UTF-16 alone). A match is given 2 seconds.
+# unicode_sets answers). Each test is asked twice, as the rule asks: over UTF-16, as an ecma_utf16 of the text's code
+# units, positions in code units; and over UTF-8 where the text has no lone surrogate (which has no UTF-8 form), as an
+# R string, positions in characters, or as a raw vector of its bytes where it holds a NUL (which an R string cannot),
+# positions in bytes. A pattern with a NUL is given as a raw vector, and a lone surrogate in a pattern is read as
+# U+FFFD. Records marked v8_deviation are left out. Any difference from V8 is a wrong answer; a refusal of a valid
+# pattern, an acceptance of an invalid one, and a match that reaches its limit are counted apart and listed too.
+# captures.jsonl is judged on exec, the global search, the sticky flag, replace and replaceAll in both encodings, and
+# on split and split3 over UTF-16 alone (V8's pieces can hold a lone half, which UTF-8 cannot carry), the answers the
+# data's rule asks. A match is given 2 seconds.
 #
-# The data gives positions in UTF-16 code units. They are compared in characters from 1, an end inclusive, as the
-# package gives them: a position between the halves of a character (which a match without u or v can reach) is the
-# character's, for a start and for an end. Texts are compared with V8's answer converted to UTF-8, a lone surrogate
-# as U+FFFD, as the package writes a half character.
+# The data gives positions in UTF-16 code units. Over UTF-8 they are compared in characters (or bytes) from 1, an end
+# inclusive, as the package gives them: a position between the halves of a character (which a match without u or v
+# can reach) is the character's, for a start and for an end (in bytes, the third byte of the four). Texts are
+# compared over UTF-8 with V8's answer converted to UTF-8, a lone surrogate as U+FFFD, as the package writes a half
+# character, and over UTF-16 code unit for code unit.
 #
 # jsonlite reads a lone surrogate escape as nothing it can keep, so each is rewritten first as the escape of a code
 # point of a block of private use code points (the block's first + its offset from U+D800), and a NUL escape as the
@@ -92,11 +95,7 @@ is_nul <- function(cps) cps == marks$first + 0x800
 
 lone <- function(s) any(is_lone(utf8ToInt(s)))
 
-# Whether a string has no R form: a lone surrogate, or a NUL.
-unaskable <- function(s) {
-  cps <- utf8ToInt(s)
-  any(is_lone(cps) | is_nul(cps))
-}
+has_nul <- function(s) any(is_nul(utf8ToInt(s)))
 
 # UTF-8, a lone surrogate as U+FFFD (as String::from_utf16_lossy writes it).
 lossy <- function(s) {
@@ -108,21 +107,43 @@ lossy <- function(s) {
   intToUtf8(cps)
 }
 
+# The code points of a text as read, a NUL as 0 and a lone surrogate as itself.
+points_of <- function(s) {
+  cps <- utf8ToInt(s)
+  l <- is_lone(cps)
+  cps[is_nul(cps)] <- 0L
+  cps[l] <- 0xD800L + cps[l] - marks$first
+  cps
+}
+
 # The UTF-16 code units of a text as read.
 units <- function(s) {
-  cps <- utf8ToInt(s)
-  out <- integer(0L)
-  for (c in cps) {
-    out <- c(out, if (is_lone(c)) {
-      0xD800 + c - marks$first
-    } else if (c > 0xFFFF) {
-      c(0xD800 + bitwShiftR(c - 0x10000, 10L), 0xDC00 + bitwAnd(c - 0x10000, 0x3FF))
-    } else {
-      c
-    })
+  cps <- points_of(s)
+  big <- cps > 0xFFFF
+  if (!any(big)) {
+    return(as.integer(cps))
   }
-  out
+  v <- cps - 0x10000L
+  pairs <- rbind(ifelse(big, 0xD800L + bitwShiftR(v, 10L), cps), ifelse(big, 0xDC00L + bitwAnd(v, 0x3FFL), NA))
+  as.integer(pairs[!is.na(pairs)])
 }
+
+as_utf16 <- function(s) structure(units(s), class = "ecma_utf16")
+
+# The UTF-8 bytes of a text with no lone surrogate (a NUL as 0).
+bytes_of <- function(s) {
+  cps <- points_of(lossy(s))
+  if (length(cps) == 0L) {
+    return(raw(0L))
+  }
+  unlist(lapply(cps, function(c) if (c == 0L) as.raw(0L) else charToRaw(intToUtf8(c))))
+}
+
+# A text over UTF-8 as the package takes it: an R string, or its bytes where it holds a NUL.
+as_utf8 <- function(s) if (has_nul(s)) bytes_of(s) else s
+
+# A pattern as the package takes it: a string, or its bytes where it holds a NUL.
+pattern_arg <- function(pattern) if (has_nul(pattern)) bytes_of(pattern) else lossy(pattern)
 
 # The UTF-16 code units of s, printable ASCII as it is and anything else as \uXXXX.
 escape <- function(s) {
@@ -133,12 +154,24 @@ escape <- function(s) {
 
 shown <- function(pattern) escape(lossy(pattern))
 
-# For each UTF-16 code unit index of a text (and its end), R's character position of a start there (from 1) and of an
-# end there (inclusive): a position between the halves of a character is the character's, for both.
-positions <- function(s) {
-  cps <- utf8ToInt(s)
+# For each UTF-16 code unit index of a text (and its end), the package's position of a start there (from 1) and of an
+# end there (inclusive). Over UTF-8 in characters, or in bytes for a raw vector: a position between the halves of a
+# character is the character's (in bytes, its third), for both. Over UTF-16 in code units.
+positions <- function(s, encoding) {
+  cps <- points_of(s)
   n <- length(cps)
   w <- ifelse(cps > 0xFFFF, 2L, 1L)
+  if (encoding == "utf16") {
+    k <- seq_len(sum(w) + 1L) - 1L
+    return(list(start = k + 1L, end = k))
+  }
+  if (has_nul(s)) {
+    w8 <- ifelse(cps < 0x80, 1L, ifelse(cps < 0x800, 2L, ifelse(cps < 0x10000, 3L, 4L)))
+    first <- c(0L, cumsum(w8))[seq_len(n)]
+    offsets <- c(unlist(lapply(seq_len(n), function(i) if (w[i] == 2L) c(first[i], first[i] + 2L) else first[i])),
+                 sum(w8))
+    return(list(start = offsets + 1L, end = offsets))
+  }
   points <- c(rep(seq_len(n) - 1L, w), n)
   ends <- points
   second <- cumsum(w)[w == 2L]
@@ -146,10 +179,22 @@ positions <- function(s) {
   list(start = points + 1L, end = ends)
 }
 
+# Whether the package's text is V8's: over UTF-8 as a string or raw vector, a lone surrogate as U+FFFD; over UTF-16
+# code unit for code unit.
+same_text <- function(expected, got, encoding) {
+  if (is.null(expected) || is.null(got)) {
+    return(FALSE)
+  }
+  if (encoding == "utf16") {
+    return(identical(unclass(got), units(expected)))
+  }
+  if (is.raw(got)) identical(got, bytes_of(expected)) else identical(got, lossy(expected))
+}
+
 new_counts <- function() c(right = 0, wrong = 0, refused = 0, accepted = 0, limited = 0, errors = 0)
 
 compile_or_why <- function(pattern, flags) {
-  tryCatch(list(re = ecma_regex(lossy(pattern), flags)), ecma_invalid_pattern = function(e) {
+  tryCatch(list(re = ecma_regex(pattern_arg(pattern), flags)), ecma_invalid_pattern = function(e) {
     list(message = paste("PARSE:", conditionMessage(e)), error = FALSE)
   }, ecma_pattern_too_large = function(e) {
     list(message = paste("TOO-LARGE:", conditionMessage(e)), error = FALSE)
@@ -189,39 +234,49 @@ judge_tests <- function(name, r, pattern, st) {
       st$w <- c(st$w, sprintf("ACCEPTED-INVALID\t%s", head))
       next
     }
-    tests <- Filter(function(t) is.logical(t[[answer]]) && length(t[[answer]]) == 1L && is.character(t$text) &&
-                      !unaskable(t$text), r$tests)
+    tests <- Filter(function(t) is.logical(t[[answer]]) && length(t[[answer]]) == 1L && is.character(t$text), r$tests)
     if (length(tests) == 0L) next
     texts <- vapply(tests, function(t) t$text, character(1L))
     expected <- vapply(tests, function(t) t[[answer]], logical(1L))
-    got <- .Call(native$native_crer_first, compiled$re, texts, 1L, LIMIT, 0L)
-    if (inherits(got, "crer_native_error")) {
-      # A text reached its limit: each is asked alone.
-      got <- vapply(texts, function(t) {
-        one <- .Call(native$native_crer_first, compiled$re, t, 1L, LIMIT, 0L)
-        if (inherits(one, "crer_native_error")) {
-          if (one[[1L]] == "limit") {
-            st$c["limited"] <- st$c["limited"] + 1
-            st$w <- c(st$w, sprintf("LIMIT\t%s\t%s\tutf8\t%s", head, escape(t),
-                                    if (grepl("memory", one[[2L]])) "memory" else "time"))
-          } else {
-            st$c["errors"] <- st$c["errors"] + 1
-            st$w <- c(st$w, sprintf("ERROR\t%s\t%s\tutf8\t%s", head, escape(t), one[[2L]]))
-          }
-          return(NA)
+    over8 <- !vapply(texts, lone, logical(1L), USE.NAMES = FALSE)
+    ask_tests(head, compiled$re, lapply(texts, as_utf16), texts, expected, "utf16", st)
+    if (any(over8)) {
+      eight <- lapply(texts[over8], as_utf8)
+      if (all(vapply(eight, is.character, logical(1L)))) eight <- unlist(eight)
+      ask_tests(head, compiled$re, eight, texts[over8], expected[over8], "utf8", st)
+    }
+  }
+}
+
+# The answers of test for each text (a character vector or a list of texts) against what V8 answered.
+ask_tests <- function(head, re, x, texts, expected, encoding, st) {
+  got <- .Call(native$native_crer_first, re, x, 1L, LIMIT, 0L)
+  if (inherits(got, "crer_native_error")) {
+    # A text reached its limit: each is asked alone.
+    got <- vapply(seq_along(texts), function(i) {
+      one <- .Call(native$native_crer_first, re, x[i], 1L, LIMIT, 0L)
+      if (inherits(one, "crer_native_error")) {
+        if (one[[1L]] == "limit") {
+          st$c["limited"] <- st$c["limited"] + 1
+          st$w <- c(st$w, sprintf("LIMIT\t%s\t%s\t%s\t%s", head, escape(texts[i]), encoding,
+                                  if (grepl("memory", one[[2L]])) "memory" else "time"))
+        } else {
+          st$c["errors"] <- st$c["errors"] + 1
+          st$w <- c(st$w, sprintf("ERROR\t%s\t%s\t%s\t%s", head, escape(texts[i]), encoding, one[[2L]]))
         }
-        one
-      }, logical(1L), USE.NAMES = FALSE)
-    }
-    judged <- !is.na(got)
-    right <- judged & got == expected
-    st$c["right"] <- st$c["right"] + sum(right)
-    bad <- which(judged & !right)
-    st$c["wrong"] <- st$c["wrong"] + length(bad)
-    for (i in bad) {
-      st$w <- c(st$w, sprintf("WRONG\t%s\t%s\tutf8\texpected %s", head, escape(texts[i]),
-                              if (expected[i]) "true" else "false"))
-    }
+        return(NA)
+      }
+      one
+    }, logical(1L))
+  }
+  judged <- !is.na(got)
+  right <- judged & got == expected
+  st$c["right"] <- st$c["right"] + sum(right)
+  bad <- which(judged & !right)
+  st$c["wrong"] <- st$c["wrong"] + length(bad)
+  for (i in bad) {
+    st$w <- c(st$w, sprintf("WRONG\t%s\t%s\t%s\texpected %s", head, escape(texts[i]), encoding,
+                            if (expected[i]) "true" else "false"))
   }
 }
 
@@ -238,7 +293,19 @@ same_slots <- function(expected, spans, groups, at) {
   length(expected) == groups && identical(as.integer(spans[seq_len(2L * groups)]), as.integer(expect_spans(expected, at)))
 }
 
-judge_mode <- function(where, a, text, re, g, y, st) {
+# Whether V8's split pieces (NULL for a group that did not take part) are the package's over UTF-16.
+same_split <- function(expected, got) {
+  is.list(expected) && length(expected) == length(got) &&
+    all(mapply(function(e, g) if (is.null(e)) is.null(g) else same_text(e, g, "utf16"), expected, got))
+}
+
+# The value of a native call, or a stop with its failure.
+value_of <- function(v) {
+  if (inherits(v, "crer_native_error")) stop(v[[2L]])
+  v
+}
+
+judge_mode <- function(where, a, text, encoding, re, g, y, st) {
   check <- function(what, ok) {
     if (isTRUE(ok)) {
       st$c["right"] <- st$c["right"] + 1
@@ -247,10 +314,11 @@ judge_mode <- function(where, a, text, re, g, y, st) {
       st$w <- c(st$w, sprintf("WRONG\tcaptures.jsonl\t%s\t%s", where(), what))
     }
   }
-  at <- positions(text)
+  x <- if (encoding == "utf16") list(as_utf16(text)) else if (has_nul(text)) list(bytes_of(text)) else text
+  at <- positions(text, encoding)
   groups <- attr(re, "group_count") + 1L
   width <- groups + length(attr(re, "group_names"))
-  spans <- .Call(native$native_crer_first, re, text, 1L, LIMIT, 2L)
+  spans <- .Call(native$native_crer_first, re, x, 1L, LIMIT, 2L)
   if (inherits(spans, "crer_native_error")) {
     if (spans[[1L]] != "limit") stop(spans[[2L]])
     st$c["limited"] <- st$c["limited"] + 1
@@ -260,8 +328,7 @@ judge_mode <- function(where, a, text, re, g, y, st) {
   check("exec", same_slots(a$exec, spans, groups, at))
 
   all <- if (is.null(a$all)) list() else a$all
-  found <- .Call(native$native_crer_all, g, text, 3L)[[1L]]
-  if (inherits(found, "crer_native_error")) stop(found[[2L]])
+  found <- value_of(.Call(native$native_crer_all, g, x, 3L))[[1L]]
   k <- length(found) %/% (2L * width)
   n <- 0L
   ok <- TRUE
@@ -276,15 +343,20 @@ judge_mode <- function(where, a, text, re, g, y, st) {
   if ((length(all) < 20L && n != length(all)) || (length(all) == 20L && n < 20L)) ok <- FALSE
   check("all", ok)
 
-  # Sticky at UTF-16 index 1, where that is a position of the text (not between the halves of a character).
-  if (nzchar(text) && utf8ToInt(text)[1L] <= 0xFFFF) {
-    check("sticky", same_slots(a$sticky, .Call(native$native_crer_first, y, text, 2L, LIMIT, 2L), groups, at))
+  # Sticky at UTF-16 index 1; over UTF-8 only where that is a position of the text (not between the halves of a
+  # character).
+  if (nzchar(text) && (encoding == "utf16" || points_of(text)[1L] <= 0xFFFF)) {
+    check("sticky", same_slots(a$sticky, .Call(native$native_crer_first, y, x, at$start[2L], LIMIT, 2L), groups, at))
   }
 
-  check("replace", !is.null(a$replace) && ecma_replace(text, re, REPLACEMENT) == lossy(a$replace))
-  check("replaceAll", !is.null(a$replaceAll) && ecma_replace(text, g, REPLACEMENT) == lossy(a$replaceAll))
-  # split and split3 are not asked: the data's rule asks them over UTF-16 alone (V8's pieces can hold a lone half,
-  # which UTF-8 cannot carry), and R's strings are UTF-8. The package's own tests check ecma_split.
+  check("replace", same_text(a$replace, value_of(.Call(native$native_crer_replace, re, x, REPLACEMENT, FALSE))[[1L]],
+                             encoding))
+  check("replaceAll", same_text(a$replaceAll, value_of(.Call(native$native_crer_replace, g, x, REPLACEMENT, FALSE))[[1L]],
+                                encoding))
+  if (encoding == "utf16") {
+    check("split", same_split(a$split, value_of(.Call(native$native_crer_split, re, x, NA_integer_))[[1L]]))
+    check("split3", same_split(a$split3, value_of(.Call(native$native_crer_split, re, x, 3L))[[1L]]))
+  }
 }
 
 judge_captures <- function(r, pattern, st) {
@@ -301,24 +373,27 @@ judge_captures <- function(r, pattern, st) {
     if (isFALSE(re)) NULL else re
   }
   for (test in r$tests) {
-    if (isTRUE(test$v8_deviation) || !is.character(test$text) || unaskable(test$text)) next
+    if (isTRUE(test$v8_deviation) || !is.character(test$text)) next
     text <- test$text
+    encodings <- if (lone(text)) "utf16" else c("utf16", "utf8")
     for (mode in c("unicode", "legacy")) {
       if (!isTRUE(valid[[mode]]) || is.null(test[[mode]])) next
       mode_flags <- paste0(flags, if (mode == "unicode") "u" else "")
-      where <- function() sprintf("/%s/%s\t%s", head_pattern, mode_flags, escape(text))
       re <- make(mode_flags)
       g <- make(paste0(mode_flags, "g"))
       y <- make(paste0(mode_flags, "y"))
       if (is.null(re) || is.null(g) || is.null(y)) {
         st$c["refused"] <- st$c["refused"] + 1
-        st$w <- c(st$w, sprintf("REFUSED\tcaptures.jsonl\t%s", where()))
+        st$w <- c(st$w, sprintf("REFUSED\tcaptures.jsonl\t/%s/%s\t%s", head_pattern, mode_flags, escape(text)))
         next
       }
-      tryCatch(judge_mode(where, test[[mode]], text, re, g, y, st), error = function(e) {
-        st$c["errors"] <- st$c["errors"] + 1
-        st$w <- c(st$w, sprintf("ERROR\tcaptures.jsonl\t%s\t%s", where(), conditionMessage(e)))
-      })
+      for (encoding in encodings) {
+        where <- function() sprintf("/%s/%s\t%s\t%s", head_pattern, mode_flags, escape(text), encoding)
+        tryCatch(judge_mode(where, test[[mode]], text, encoding, re, g, y, st), error = function(e) {
+          st$c["errors"] <- st$c["errors"] + 1
+          st$w <- c(st$w, sprintf("ERROR\tcaptures.jsonl\t%s\t%s", where(), conditionMessage(e)))
+        })
+      }
     }
   }
 }
@@ -337,7 +412,7 @@ judge_lines <- function(name, lines) {
       next
     }
     records <- records + 1L
-    if (!is.character(r$pattern) || any(is_nul(utf8ToInt(r$pattern)))) next
+    if (!is.character(r$pattern)) next
     if (name == "captures.jsonl") judge_captures(r, r$pattern, st) else judge_tests(name, r, r$pattern, st)
   }
   list(c = st$c, w = st$w, records = records, skipped = skipped)

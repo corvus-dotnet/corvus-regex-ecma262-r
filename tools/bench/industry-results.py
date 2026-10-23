@@ -53,7 +53,7 @@ def compliance(engine, note=None):
 
 ENGINES = [
     ("corvus", "corvus-regex-ecma262", "R", facts.get("corvus-regex-ecma262", ""),
-     compliance("corvus", "Over UTF-8 alone (R's strings), of the texts and patterns an R string can hold: none with a lone surrogate or a NUL.")),
+     compliance("corvus", "Over UTF-16 (ecma_utf16 texts) and UTF-8 (R's strings, and raw vectors for a text or pattern with a NUL).")),
     ("pcre", "PCRE2 (gregexpr, perl = TRUE)", "R", facts.get("pcre", ""), "not ECMA-262"),
     ("tre", "TRE (gregexpr)", "R", facts.get("tre", ""), "not ECMA-262"),
     ("icu", "ICU (stringi)", "R", facts.get("icu", ""), "not ECMA-262"),
@@ -97,7 +97,7 @@ runtime = "; ".join(x for x in (facts.get("r", ""), v8["engine"] if v8 else "") 
 
 # The encodings each engine's runner answers in, which the central benchmark page's compliance figure is a share of:
 # every answer the test data asks in those encodings, so an answer the runner did not ask counts against the engine.
-ENCODINGS = {"corvus": ["utf8"], "v8": ["utf16"]}
+ENCODINGS = {"v8": ["utf16"]}
 for key, _, _, _, counts in ENGINES:
     if isinstance(counts, dict):
         counts["encodings"] = ENCODINGS.get(key, ["utf16", "utf8"])

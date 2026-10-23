@@ -26,7 +26,8 @@ ecma_default_timeout()
 \method{format}{ecma_regex}(x, ...)
 }
 \arguments{
-\item{pattern}{For \code{ecma_regex}, one string; for \code{ecma_valid}, a character vector.}
+\item{pattern}{For \code{ecma_regex}, one string, or a raw vector of UTF-8 (which may hold a NUL); for
+  \code{ecma_valid}, a character vector, a raw vector, or a list of strings and raw vectors.}
 \item{flags}{The flags, such as \code{""}, \code{"u"} or \code{"gimsuy"}: for \code{ecma_valid}, recycled.}
 \item{timeout}{The time in seconds each match may take before it is abandoned with \code{ecma_match_limit}, \code{0}
 for no limit, or \code{NULL} for \code{ecma_default_timeout()}.}
@@ -35,7 +36,8 @@ for no limit, or \code{NULL} for \code{ecma_default_timeout()}.}
 \item{...}{Not used.}
 }
 \value{
-\code{ecma_regex} returns an object of class \code{ecma_regex}, with the attributes \code{source}, \code{flags} (in
+\code{ecma_regex} returns an object of class \code{ecma_regex}, with the attributes \code{source} (a raw vector where
+it holds a NUL, which \code{format} writes as \verb{\\0}), \code{flags} (in
 the order \code{RegExp} gives them), \code{group_count} and \code{group_names} (the distinct names of the groups, in
 the order of the first group of each) and \code{timeout} (\code{NULL} for none). It is used by every other function,
 and from any number of calls. \code{ecma_default_timeout} returns the default timeout in seconds, or \code{NULL}.
