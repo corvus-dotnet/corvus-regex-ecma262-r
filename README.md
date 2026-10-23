@@ -13,16 +13,19 @@ Regular expressions with the grammar and the answers of ECMA-262, the `RegExp` o
 - A pattern answers as it does in a browser or Node, which R's `regexpr` family and stringi do not: `^` and `$`, `.`,
   `\d`, `\w`, `\b`, case folding, `\p{...}` and the rest read as JavaScript reads them. A pattern from JavaScript code,
   a JSON Schema or an OpenAPI document means here what it means there.
-- Every function works over a character vector, and takes a pattern compiled once or as a string.
+- Every function works over a character vector, and takes a pattern compiled once or as a string. It works as well
+  over texts an R string cannot hold: a raw vector of UTF-8, which may hold a NUL, and an `ecma_utf16` of UTF-16 code
+  units, which may hold lone surrogates, as a JavaScript string can.
 - A pattern without a backreference is matched in time proportional to its size times the text, and a pattern can be
   given a match timeout, as a `Regex` of .NET can, which every function honours and which caps the backtracking memory
   too, so with a timeout neither a pattern nor a text from outside can make a program hang.
 
 **Compliance.** Over the [ECMA-262 test data](https://github.com/corvus-dotnet/ecma262-regex-test-data) (what V8 says
-about 117,889 patterns and 5,884,566 texts, test262's and `exec`, the global search, `replace` and `split` among
-them), through this package, it gives 13,720,533 right answers and none wrong, refuses no valid pattern, accepts no
-invalid one and reaches no limit. R's strings are UTF-8, so that is every answer about a text and a pattern an R
-string can hold: the data's texts with a lone surrogate or a NUL character have no R form. CI runs the whole data.
+about 117,889 patterns and 5,884,566 texts, test262's and `exec`, the global search, `replace` and `split` among them,
+and texts of bytes that are not UTF-8, which it refuses), through this package over R's strings, raw vectors and
+`ecma_utf16` code units, it gives 26,953,709 right answers, every answer the data asks, and none wrong, refuses no valid
+pattern, accepts no invalid one and reaches no limit. CI runs the whole data. (A text with a NUL, which an R string
+cannot hold, is asked as a raw vector, and the answers over UTF-16 as code units.)
 
 ## Install
 
@@ -74,6 +77,7 @@ ecma_split("a ; b;c", "\\s*(;)\\s*")                         # list(c("a", ";", 
 | `ecma_replace(x, regex, replacement)` | `String.prototype.replace`: the first match, or every match with `g`, by a template or a function. |
 | `ecma_replace_all(x, regex, replacement)` | `String.prototype.replaceAll`: every match. |
 | `ecma_split(x, regex, limit = NULL)` | `String.prototype.split`: a list of character vectors. |
+| `ecma_utf16(x)` | The UTF-16 code units of a string or of a raw vector of UTF-8, or code units given as numbers: a text with JavaScript's code units, which every function takes. `as.character` and `as.raw` turn one back. |
 | `ecma_version()` | The package's and the crate's versions. |
 
 A match's row is the match, then each group, then one column for each group name (of the groups that share a name,
@@ -89,6 +93,17 @@ or a text it did not write should set one.
 **Positions.** Positions are in characters from 1, as `nchar` counts them, an end inclusive, as `regexpr` gives them;
 an empty match ends one character before it starts. Without `u` or `v` a match can take half of a character beyond the
 Basic Multilingual Plane: its text then holds that half as U+FFFD, and its positions are the whole character's.
+
+**Texts that are not strings.** `x` may also be a raw vector (one text of UTF-8 bytes, which may hold a NUL),
+an `ecma_utf16` (one text of UTF-16 code units, which may hold lone surrogates), or a list of them, `NULL` for a
+missing text. Positions are then in bytes or in code units, and the texts of a match, a replacement and a split's
+pieces come back in the form of the text (a match's row is a list matrix). A raw vector that is not UTF-8 is refused
+with `ecma_encoding_error`, never read in part. A pattern may be a raw vector too, so that it can hold a NUL.
+
+```r
+ecma_locate(ecma_utf16(c(0x61, 0xD800, 0x62)), "\\uD800")        # start 2, end 2
+ecma_replace(as.raw(c(0x61, 0x00, 0x62)), "\\0", "-")             # as.raw(c(0x61, 0x2d, 0x62))
+```
 
 **Strings.** A string marked as UTF-8, or in the native encoding of a UTF-8 session, is read in place (after a check
 that it is UTF-8, which a long string has once while it is matched again and again); one in another encoding is

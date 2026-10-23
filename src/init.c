@@ -8,6 +8,8 @@
 void crer_init(SEXP nil, SEXP class, SEXP na_string, SEXP regex_tag);
 SEXP crer_set_utf8_session(SEXP utf8);
 SEXP crer_version(void);
+SEXP crer_utf16(SEXP x);
+SEXP crer_from_utf16(SEXP x, SEXP as_raw);
 SEXP crer_compile(SEXP pattern, SEXP flags, SEXP timeout);
 SEXP crer_set_default_timeout(SEXP seconds);
 SEXP crer_default_timeout(void);
@@ -23,6 +25,8 @@ SEXP crer_split(SEXP regex, SEXP x, SEXP limit);
 static const R_CallMethodDef call_methods[] = {
     {"crer_set_utf8_session", (DL_FUNC) &crer_set_utf8_session, 1},
     {"crer_version", (DL_FUNC) &crer_version, 0},
+    {"crer_utf16", (DL_FUNC) &crer_utf16, 1},
+    {"crer_from_utf16", (DL_FUNC) &crer_from_utf16, 2},
     {"crer_compile", (DL_FUNC) &crer_compile, 3},
     {"crer_set_default_timeout", (DL_FUNC) &crer_set_default_timeout, 1},
     {"crer_default_timeout", (DL_FUNC) &crer_default_timeout, 0},

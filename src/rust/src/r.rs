@@ -18,11 +18,13 @@ pub struct SEXPREC {
 pub type SEXP = *mut SEXPREC;
 pub type R_xlen_t = isize;
 
+pub const NILSXP: c_int = 0;
 pub const LGLSXP: c_int = 10;
 pub const INTSXP: c_int = 13;
 pub const STRSXP: c_int = 16;
 pub const VECSXP: c_int = 19;
 pub const EXTPTRSXP: c_int = 22;
+pub const RAWSXP: c_int = 24;
 
 /// `cetype_t`: a string in the session's native encoding, marked as UTF-8, as Latin-1, or as bytes.
 pub const CE_NATIVE: c_int = 0;
@@ -45,12 +47,14 @@ unsafe extern "C" {
 
     pub fn LOGICAL(x: SEXP) -> *mut c_int;
     pub fn INTEGER(x: SEXP) -> *mut c_int;
+    pub fn RAW(x: SEXP) -> *mut u8;
     pub fn LOGICAL_ELT(x: SEXP, i: R_xlen_t) -> c_int;
     pub fn INTEGER_ELT(x: SEXP, i: R_xlen_t) -> c_int;
     pub fn REAL_ELT(x: SEXP, i: R_xlen_t) -> c_double;
     pub fn Rf_ScalarReal(x: c_double) -> SEXP;
     pub fn STRING_ELT(x: SEXP, i: R_xlen_t) -> SEXP;
     pub fn SET_STRING_ELT(x: SEXP, i: R_xlen_t, v: SEXP);
+    pub fn VECTOR_ELT(x: SEXP, i: R_xlen_t) -> SEXP;
     pub fn SET_VECTOR_ELT(x: SEXP, i: R_xlen_t, v: SEXP) -> SEXP;
 
     pub fn R_CHAR(x: SEXP) -> *const c_char;

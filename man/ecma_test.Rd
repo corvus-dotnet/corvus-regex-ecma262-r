@@ -16,9 +16,11 @@ ecma_match(x, regex, start = 1L, timeout = NULL)
 ecma_locate(x, regex, group = 0L, start = 1L, timeout = NULL)
 }
 \arguments{
-\item{x}{A character vector.}
+\item{x}{A character vector, or texts in another form: a raw vector of UTF-8 or an \code{ecma_utf16} of code units,
+  or a list of them (see \code{\link{ecma_utf16}}).}
 \item{regex}{A regular expression from \code{\link{ecma_regex}}, or a pattern compiled without flags.}
-\item{start}{Where each search starts, in characters from 1 (recycled), as \code{lastIndex} sets it: with the
+\item{start}{Where each search starts, in characters from 1 (in bytes for a raw vector, in code units for an
+  \code{ecma_utf16}; recycled), as \code{lastIndex} sets it: with the
   \code{y} flag a match must start there.}
 \item{timeout}{A limit in seconds on the time this match may take in place of the pattern's timeout (\code{0} for
 none), or \code{NULL} for the pattern's.}
@@ -30,6 +32,10 @@ the match, then each group, then one column for each group name (named by it: of
 that took part). \code{ecma_locate} returns an integer matrix with the columns \code{start} and \code{end}. An empty
 match ends one character before it starts. There is \code{NA} for an \code{NA} string, for a string the pattern does
 not match, and for a group that did not take part.
+
+For texts in a list (or a raw vector or an \code{ecma_utf16} alone), \code{ecma_match} returns a list matrix laid out
+the same way, each entry a text in the form of the one matched, or \code{NULL}; positions are in bytes for a raw vector
+and in code units for an \code{ecma_utf16}.
 }
 \section{Limits}{
 A match that reaches the pattern's timeout (see \code{\link{ecma_regex}}) or \code{timeout}, or the cap on
