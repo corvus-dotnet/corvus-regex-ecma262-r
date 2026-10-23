@@ -10,7 +10,8 @@
 # string cannot hold a NUL character, so a text with one is not asked about, nor a pattern with one.
 # Records marked v8_deviation are left out. Any difference from V8 is a wrong answer; a refusal of a valid pattern, an
 # acceptance of an invalid one, and a match that reaches its limit are counted apart and listed too. captures.jsonl is
-# judged on exec, the global search, the sticky flag, replace and split. A match is given 2 seconds.
+# judged on exec, the global search, the sticky flag, replace and replaceAll, the answers the data's rule asks over
+# UTF-8 (split is asked over UTF-16 alone). A match is given 2 seconds.
 #
 # The data gives positions in UTF-16 code units. They are compared in characters from 1, an end inclusive, as the
 # package gives them: a position between the halves of a character (which a match without u or v can reach) is the
@@ -237,11 +238,6 @@ same_slots <- function(expected, spans, groups, at) {
   length(expected) == groups && identical(as.integer(spans[seq_len(2L * groups)]), as.integer(expect_spans(expected, at)))
 }
 
-same_split <- function(expected, got) {
-  is.list(expected) && length(expected) == length(got) &&
-    all(mapply(function(e, g) if (is.null(e)) is.na(g) else !is.na(g) && lossy(e) == g, expected, got))
-}
-
 judge_mode <- function(where, a, text, re, g, y, st) {
   check <- function(what, ok) {
     if (isTRUE(ok)) {
@@ -287,8 +283,8 @@ judge_mode <- function(where, a, text, re, g, y, st) {
 
   check("replace", !is.null(a$replace) && ecma_replace(text, re, REPLACEMENT) == lossy(a$replace))
   check("replaceAll", !is.null(a$replaceAll) && ecma_replace(text, g, REPLACEMENT) == lossy(a$replaceAll))
-  check("split", same_split(a$split, ecma_split(text, re)[[1L]]))
-  check("split3", same_split(a$split3, ecma_split(text, re, limit = 3L)[[1L]]))
+  # split and split3 are not asked: the data's rule asks them over UTF-16 alone (V8's pieces can hold a lone half,
+  # which UTF-8 cannot carry), and R's strings are UTF-8. The package's own tests check ecma_split.
 }
 
 judge_captures <- function(r, pattern, st) {
