@@ -1,6 +1,6 @@
 # The Industry benchmark from R: each workload counted by each engine, in nanoseconds per count, under the interleaved
-# protocol every Corvus ECMA-262 engine's harness follows (docs/benchmarks/README.md in corvus-regex-ecma262-rs), a port
-# of the C harness's driver (tools/c/industry.c there):
+# protocol every harness of the central benchmark page follows (docs/benchmarks/README.md in
+# corvus-regex-ecma262-rs), a port of the C harness's driver (tools/c/industry.c there):
 #
 #   Rscript industry.R <workloads.json> [--engines corvus,pcre,tre,icu,v8] [--v8 <industry.mjs>] [--rounds 3]
 #           [--seconds 0.7] [--passes 7] [--spread 0.05] [--filter <substring of the id>] [--out <results.json>]
