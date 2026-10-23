@@ -13,7 +13,9 @@
 # pattern, an acceptance of an invalid one, and a match that reaches its limit are counted apart and listed too.
 # captures.jsonl is judged on exec, the global search, the sticky flag, replace and replaceAll in both encodings, and
 # on split and split3 over UTF-16 alone (V8's pieces can hold a lone half, which UTF-8 cannot carry), the answers the
-# data's rule asks. A match is given 2 seconds.
+# data's rule asks. A match is given 2 seconds. ill-formed-utf8.jsonl holds bytes that are not UTF-8, each one answer
+# over UTF-8 under each grammar the pattern is valid in, asked as a raw vector, whose right answer is a refusal (the
+# package's ecma_encoding_error).
 #
 # The data gives positions in UTF-16 code units. Over UTF-8 they are compared in characters (or bytes) from 1, an end
 # inclusive, as the package gives them: a position between the halves of a character (which a match without u or v
@@ -398,6 +400,48 @@ judge_captures <- function(r, pattern, st) {
   }
 }
 
+judge_ill_formed <- function(r, pattern, st) {
+  name <- "ill-formed-utf8.jsonl"
+  flags <- if (is.null(r$flags)) "" else r$flags
+  head_pattern <- shown(pattern)
+  for (mode in modes_of(r)) {
+    mode_flags <- paste0(flags, mode[[1L]])
+    valid <- mode[[3L]]
+    head <- sprintf("%s\t/%s/%s", name, head_pattern, mode_flags)
+    compiled <- compile_or_why(pattern, mode_flags)
+    if (is.null(compiled$re)) {
+      if (compiled$error) st$c["errors"] <- st$c["errors"] + 1
+      if (valid) {
+        st$c["refused"] <- st$c["refused"] + 1
+        st$w <- c(st$w, sprintf("REFUSED\t%s\t%s", head, strsplit(compiled$message, "\n", fixed = TRUE)[[1L]][1L]))
+      }
+      next
+    }
+    if (!valid) {
+      st$c["accepted"] <- st$c["accepted"] + 1
+      st$w <- c(st$w, sprintf("ACCEPTED-INVALID\t%s", head))
+      next
+    }
+    for (t in r$tests) {
+      hex <- t$bytes
+      bytes <- as.raw(strtoi(substring(hex, seq(1L, nchar(hex), 2L), seq(2L, nchar(hex), 2L)), 16L))
+      got <- .Call(native$native_crer_first, compiled$re, list(bytes), 1L, LIMIT, 0L)
+      if (inherits(got, "crer_native_error") && got[[1L]] == "encoding") {
+        st$c["right"] <- st$c["right"] + 1
+      } else if (inherits(got, "crer_native_error") && got[[1L]] == "limit") {
+        st$c["limited"] <- st$c["limited"] + 1
+        st$w <- c(st$w, sprintf("LIMIT\t%s\t%s\tutf8", head, hex))
+      } else if (inherits(got, "crer_native_error")) {
+        st$c["errors"] <- st$c["errors"] + 1
+        st$w <- c(st$w, sprintf("ERROR\t%s\t%s\tutf8\t%s", head, hex, got[[2L]]))
+      } else {
+        st$c["wrong"] <- st$c["wrong"] + 1
+        st$w <- c(st$w, sprintf("WRONG\t%s\t%s\tutf8\tread as UTF-8 (%s), not refused", head, hex, got))
+      }
+    }
+  }
+}
+
 judge_lines <- function(name, lines) {
   st <- new.env()
   st$c <- new_counts()
@@ -413,7 +457,13 @@ judge_lines <- function(name, lines) {
     }
     records <- records + 1L
     if (!is.character(r$pattern)) next
-    if (name == "captures.jsonl") judge_captures(r, r$pattern, st) else judge_tests(name, r, r$pattern, st)
+    if (name == "captures.jsonl") {
+      judge_captures(r, r$pattern, st)
+    } else if (name == "ill-formed-utf8.jsonl") {
+      judge_ill_formed(r, r$pattern, st)
+    } else {
+      judge_tests(name, r, r$pattern, st)
+    }
   }
   list(c = st$c, w = st$w, records = records, skipped = skipped)
 }
