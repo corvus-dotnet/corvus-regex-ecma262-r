@@ -343,6 +343,8 @@ judge_mode <- function(where, a, text, encoding, re, g, y, st) {
     n <- i
   }
   if ((length(all) < 20L && n != length(all)) || (length(all) == 20L && n < 20L)) ok <- FALSE
+  # More matches than the data has: wrong, unless the data kept only the first twenty.
+  if (length(all) < 20L && k > length(all)) ok <- FALSE
   check("all", ok)
 
   # Sticky at UTF-16 index 1; over UTF-8 only where that is a position of the text (not between the halves of a
