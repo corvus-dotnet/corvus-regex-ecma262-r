@@ -5,13 +5,13 @@
 #   Rscript industry.R <workloads.json> [--engines corvus,pcre,tre,icu,v8] [--v8 <industry.mjs>] [--rounds 3]
 #           [--seconds 0.7] [--passes 7] [--spread 0.05] [--filter <substring of the id>] [--out <results.json>]
 #
-# The workloads are the outer loop, each workload's rounds next and the engines innermost, their order turned by one each
-# round, so that a workload's rounds are seconds apart, as its engines are. Each figure is a child process of its own
-# (`Rscript industry.R --one`, or `node industry.mjs --one` for V8), which warms for two fifths of its seconds, then
+# The workloads are the outer loop, each workload's rounds next and the engines innermost, their order turned by one
+# each round, so that a workload's rounds are seconds apart, as its engines are. Each figure is a child process of its
+# own (`Rscript industry.R --one`, or `node industry.mjs --one` for V8), which warms for two fifths of its seconds, then
 # times `passes` passes of as many counts as fit the rest and reports their median. A workload's figure for an engine is
 # the median of its rounds, with the fastest and the slowest round as its spread; a figure whose spread, (slowest -
-# fastest) / median, is over --spread is listed in the run's facts (spread_over) and on stderr. A child that does not
-# finish in two minutes is stopped and recorded as such.
+# fastest) / median, is over --spread is listed in the run's facts (spread_over) and on stderr. A figure that does not
+# finish in 30 s is stopped and recorded as giving no result within 30 s, and is not run in the workload's later rounds.
 #
 # The engines, each counting every match of a global search as an R program that wants every match would:
 # - corvus: this package with the workload's flags and u, with ecma_count;
@@ -128,18 +128,21 @@ one <- function(path, index, engine, seconds, passes) {
   }, error = function(e) list(error = conditionMessage(e)), warning = function(e) list(error = conditionMessage(e)))
 }
 
+# A figure stopped at the limit, which the page shows as giving no result within 30 s.
+STOPPED <- list(error = "did not produce a result within 30 s", limit = 30L)
+
 # One figure in a child process: the child's line of JSON, or one with the error.
 figure <- function(script, v8, path, index, engine, seconds, passes) {
   out <- if (engine == "v8") {
     suppressWarnings(system2("node", c(v8, "--one", path, index, seconds, passes), stdout = TRUE, stderr = FALSE,
-                             timeout = 120))
+                             timeout = 30))
   } else {
     suppressWarnings(system2(file.path(R.home("bin"), "Rscript"), c(script, "--one", path, index, engine, seconds, passes),
-                             stdout = TRUE, stderr = FALSE, timeout = 120))
+                             stdout = TRUE, stderr = FALSE, timeout = 30))
   }
   status <- attr(out, "status")
   if (!is.null(status) && status == 124L) {
-    return(list(error = "did not finish in two minutes"))
+    return(STOPPED)
   }
   out <- out[nzchar(out)]
   if (length(out) == 0L) {
@@ -201,6 +204,8 @@ main <- function(args) {
     for (rnd in seq_len(rounds) - 1L) {
       for (turn in seq_along(engines) - 1L) {
         e <- engines[[(turn + rnd) %% length(engines) + 1L]]
+        # A figure stopped at the limit in an earlier round is not run again.
+        if (identical(figures[[e]][[key]]$line, STOPPED)) next
         line <- figure(script, v8, path, k, e, seconds, passes)
         fig <- figures[[e]][[key]]
         if (is.null(fig)) fig <- list(each = numeric(0L))
