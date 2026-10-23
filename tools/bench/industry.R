@@ -15,8 +15,9 @@
 #
 # The engines, each counting every match of a global search as an R program that wants every match would:
 # - corvus: this package with the workload's flags and u, with ecma_count;
-# - pcre: base R's gregexpr with perl = TRUE (PCRE2, with its JIT where R has it), which does not claim ECMA-262, given
-#   the pattern as it is with the flags i, m and s;
+# - pcre: base R's gregexpr with perl = TRUE and useBytes = TRUE (PCRE2, with its JIT where R has it), which does not
+#   claim ECMA-262, given the pattern as it is with the flags i, m and s and (*UTF) at its head, so that PCRE2 still
+#   matches characters while gregexpr reports byte offsets, which a count does not need turned into characters;
 # - tre: base R's gregexpr (TRE), which does not claim ECMA-262, the same way (it has no m or s flag, so a workload with
 #   either is an error);
 # - icu: stringi's stri_count_regex (ICU), which does not claim ECMA-262, the same way;
@@ -101,9 +102,16 @@ one <- function(path, index, engine, seconds, passes) {
         function() ecma_count(text, re)
       },
       pcre = {
-        p <- if (nzchar(inline)) paste0("(?", inline, ")", pattern) else pattern
+        # Without useBytes, gregexpr turns each match's byte offset into a character position by counting the characters
+        # from the start of the text, so a count of a UTF-8 text that is not all ASCII cost the matches times the length
+        # (the Holmes workload 300 ms, and twenty workloads over 30 s, on 2026-10-23). With useBytes it reports the byte
+        # offsets as they are, and (*UTF) keeps PCRE2 in UTF mode, so that ., classes, \p{..} and case folding still see
+        # characters. Every workload counts as it did. PCRE2 still checks the UTF-8 from each search's start to the end of
+        # the text, since R asks it to with useBytes, so a workload with many thousands of matches still costs more than
+        # one pass over the text; R's own UTF-8 mode, which skips that check, is the one that converts the offsets.
+        p <- paste0("(*UTF)", if (nzchar(inline)) paste0("(?", inline, ")", pattern) else pattern)
         function() {
-          m <- gregexpr(p, text, perl = TRUE)[[1L]]
+          m <- gregexpr(p, text, perl = TRUE, useBytes = TRUE)[[1L]]
           if (m[1L] == -1L) 0L else length(m)
         }
       },

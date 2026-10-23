@@ -156,7 +156,7 @@ data = {
                  + ([["Counts", "PCRE2, TRE or ICU counts otherwise than V8 on " + str(len(differs)) + " workloads (each says so)"]] if differs else []),
         "method": "<p>Each figure is one count of every match a global search finds over the whole text, as an R program counts them. "
                   "This package runs with the workload's flags and u, with ecma_count over the pattern compiled once; "
-                  "base R's gregexpr with perl = TRUE (PCRE2) and without (TRE, which has no m or s flag), and stringi's stri_count_regex (ICU), each given the pattern in each call as R programs use them, with the pattern as it is and the flags i, m and s; V8 with gu added.</p>",
+                  "base R's gregexpr with perl = TRUE and useBytes = TRUE, the pattern headed by (*UTF) (PCRE2, matching characters and reporting byte offsets) and without perl (TRE, which has no m or s flag), and stringi's stri_count_regex (ICU), each given the pattern in each call as R programs use them, with the pattern as it is and the flags i, m and s; V8 with gu added.</p>",
     },
     "vocab": {
         "impl": "engine", "impls": "engines", "Impls": "Engines",
