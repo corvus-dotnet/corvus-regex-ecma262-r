@@ -11,7 +11,7 @@ publish = false
 crate-type = ["staticlib"]
 
 [dependencies]
-corvus-regex-ecma262 = "0.2.0"
+corvus-regex-ecma262 = "0.2.1"
 simdutf8 = "0.1.5"
 
 [profile.release]
