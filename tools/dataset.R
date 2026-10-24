@@ -2,6 +2,7 @@
 # judged by the data's own rule ("How a runner judges an engine" in its README) as the C library's runner judges it:
 #
 #   Rscript tools/dataset.R <data directory> <wrong-cases output file> [--files <glob>] [--workers N]
+#                           [--compliance <file>]
 #
 # Each record is asked about under each grammar V8 found it valid in: the record's flags with u added (the unicode
 # answers), the record's flags alone (the legacy answers) and, in the file that has them, the flags with v added (the
@@ -16,6 +17,15 @@
 # data's rule asks. A match is given 2 seconds. ill-formed-utf8.jsonl holds bytes that are not UTF-8, each one answer
 # over UTF-8 under each grammar the pattern is valid in, asked as a raw vector, whose right answer is a refusal (the
 # package's ecma_encoding_error).
+#
+# exec/test262.jsonl, the exec calls of test262 (in a directory of its own), is judged last: each call one exec with the
+# record's flags from its lastIndex, right when the positions of the match and of every group, the named groups and,
+# with g or y, the lastIndex after are V8's; one answer over UTF-16 and, when the text holds no lone surrogate and
+# lastIndex is not between the halves of a pair, one over UTF-8, its positions compared as above.
+#
+# With --compliance <file>, the engine's compliance object is written to the file, as the benchmark page reads it
+# (docs/implementing-a-source.md in corvus-regex-ecma262-benchmarks): the counts, this runner and the calls it makes in
+# each encoding, and what it leaves out, which for this package is nothing.
 #
 # The data gives positions in UTF-16 code units. Over UTF-8 they are compared in characters (or bytes) from 1, an end
 # inclusive, as the package gives them: a position between the halves of a character (which a match without u or v
@@ -444,6 +454,96 @@ judge_ill_formed <- function(r, pattern, st) {
   }
 }
 
+EXEC <- "exec/test262.jsonl"
+
+# A call's lastIndex. Past the end of the text exec gives null; test262 sets it as far as 2^53 - 1 and
+# Number.MAX_VALUE, so anything past the end reads as the text's length plus one.
+last_index_of <- function(t, length) if (t$lastIndex > length) length + 1L else as.integer(t$lastIndex)
+
+# Whether a position is between the halves of a surrogate pair, where UTF-8 has no position.
+inside_pair <- function(u, at) {
+  at > 0L && at < length(u) && u[at + 1L] >= 0xDC00L && u[at + 1L] <= 0xDFFFL && u[at] >= 0xD800L && u[at] <= 0xDBFFL
+}
+
+# Whether a match's spans (NA first for none) are the call's answer: both null, or the same groups, the same named
+# groups (present exactly when the pattern has names) and, with g or y, a lastIndex after at the match's end, the
+# answer's positions read through at.
+same_exec <- function(answer, spans, groups, names, carries, at) {
+  if (is.null(answer) || is.na(spans[1L])) {
+    return(is.null(answer) && is.na(spans[1L]))
+  }
+  if (!same_slots(answer$captures, spans, groups, at)) {
+    return(FALSE)
+  }
+  given <- answer$groups
+  if (is.null(given)) {
+    if (length(names) > 0L) return(FALSE)
+  } else {
+    if (!setequal(names(given), names) || length(given) != length(names)) return(FALSE)
+    for (n in names(given)) {
+      k <- match(n, names)
+      got <- spans[2L * groups + 2L * k - c(1L, 0L)]
+      if (!identical(as.integer(got), as.integer(expect_spans(list(given[[n]]), at)))) return(FALSE)
+    }
+  }
+  !carries || identical(as.integer(spans[2L]), as.integer(at$end[answer$lastIndex + 1L]))
+}
+
+# A record of exec/test262.jsonl: the pattern with its own flags (g, y and d among them), from each call's lastIndex.
+judge_exec <- function(r, pattern, st) {
+  flags <- r$flags
+  made <- compile_or_why(pattern, flags)
+  if (is.null(made$re)) {
+    st$c["refused"] <- st$c["refused"] + 1
+    st$w <- c(st$w, sprintf("REFUSED\t%s\t/%s/%s\t%s", EXEC, shown(pattern), flags, made$message))
+    return(invisible())
+  }
+  re <- made$re
+  carries <- grepl("[gy]", flags)
+  groups <- attr(re, "group_count") + 1L
+  names <- attr(re, "group_names")
+  for (t in r$tests) {
+    if (isTRUE(t$v8_deviation)) next
+    text <- t$text
+    u <- units(text)
+    start <- if (carries) last_index_of(t, length(u)) else 0L
+    head <- sprintf("/%s/%s\t%s\t%s", shown(pattern), flags, escape(text), format(t$lastIndex, digits = 17))
+    encodings <- if (lone(text) || inside_pair(u, start)) "utf16" else c("utf16", "utf8")
+    for (encoding in encodings) {
+      x <- if (encoding == "utf16") list(as_utf16(text)) else if (has_nul(text)) list(bytes_of(text)) else text
+      at <- positions(text, encoding)
+      spans <- if (start > length(u)) NA else .Call(native$native_crer_first, re, x, as.integer(at$start[start + 1L]), LIMIT, 2L)
+      if (inherits(spans, "crer_native_error")) {
+        kind <- if (spans[[1L]] == "limit") "limited" else "errors"
+        st$c[kind] <- st$c[kind] + 1
+        st$w <- c(st$w, sprintf("%s\t%s\t%s\t%s", if (kind == "limited") "LIMIT" else "ERROR", EXEC, head, encoding))
+      } else if (same_exec(t$answer, spans, groups, names, carries, at)) {
+        st$c["right"] <- st$c["right"] + 1
+      } else {
+        st$c["wrong"] <- st$c["wrong"] + 1
+        st$w <- c(st$w, sprintf("WRONG\t%s\t%s\t%s", EXEC, head, encoding))
+      }
+    }
+  }
+}
+
+# The engine's compliance as the benchmark page reads it: the counts, this runner and the calls it makes in each
+# encoding (the package's functions whose native code it calls), and what it leaves out.
+write_compliance <- function(path, total) {
+  calls <- function(text, fs) sprintf("%s(%s)", fs, text)
+  writeLines(jsonlite::toJSON(list(
+    right = total[["right"]], wrong = total[["wrong"]], refused = total[["refused"]],
+    acceptedInvalid = total[["accepted"]], limited = total[["limited"]] + total[["errors"]],
+    judge = list(
+      runner = "https://github.com/corvus-dotnet/corvus-regex-ecma262-r/blob/main/tools/dataset.R",
+      calls = list(
+        utf16 = calls("ecma_utf16", c("ecma_test", "ecma_locate", "ecma_locate_all", "ecma_replace", "ecma_replace_all",
+                                      "ecma_split")),
+        utf8 = calls("character or raw", c("ecma_test", "ecma_locate", "ecma_locate_all", "ecma_replace",
+                                           "ecma_replace_all")))),
+    excludes = list()), auto_unbox = TRUE, digits = NA), path)
+}
+
 judge_lines <- function(name, lines) {
   st <- new.env()
   st$c <- new_counts()
@@ -459,7 +559,9 @@ judge_lines <- function(name, lines) {
     }
     records <- records + 1L
     if (!is.character(r$pattern)) next
-    if (name == "captures.jsonl") {
+    if (name == EXEC) {
+      judge_exec(r, r$pattern, st)
+    } else if (name == "captures.jsonl") {
       judge_captures(r, r$pattern, st)
     } else if (name == "ill-formed-utf8.jsonl") {
       judge_ill_formed(r, r$pattern, st)
@@ -472,21 +574,25 @@ judge_lines <- function(name, lines) {
 
 main <- function(args) {
   if (length(args) < 2L) {
-    cat("usage: Rscript tools/dataset.R <data directory> <wrong-cases file> [--files glob] [--workers N]\n")
+    cat("usage: Rscript tools/dataset.R <data directory> <wrong-cases file> [--files glob] [--workers N] [--compliance file]\n")
     quit(status = 2L)
   }
   data <- args[[1L]]
   wrong_path <- args[[2L]]
   glob <- "*.jsonl"
   workers <- 4L
+  compliance <- NULL
   i <- 3L
   while (i < length(args)) {
     if (args[[i]] == "--files") glob <- args[[i + 1L]]
     if (args[[i]] == "--workers") workers <- as.integer(args[[i + 1L]])
+    if (args[[i]] == "--compliance") compliance <- args[[i + 1L]]
     i <- i + 2L
   }
   files <- sort(list.files(data, pattern = utils::glob2rx(glob)))
   files <- files[endsWith(files, ".jsonl")]
+  # The exec calls of test262, in a directory of their own: with the default filter, or one that names them.
+  if ((glob == "*.jsonl" || startsWith(glob, "exec")) && file.exists(file.path(data, EXEC))) files <- c(files, EXEC)
   total <- new_counts()
   wrong <- character(0L)
   records <- 0L
@@ -510,6 +616,7 @@ main <- function(args) {
     total <- total + file_total
   }
   writeLines(enc2utf8(sort(wrong, method = "radix")), file(wrong_path, encoding = "UTF-8"))
+  if (!is.null(compliance)) write_compliance(compliance, total)
   cat(sprintf("\nrecords %d (skipped %d deviations)  right %.0f  wrong %.0f  refused-valid %.0f  accepted-invalid %.0f  limit %.0f  errors %.0f  in %.1fs\n",
               records, skipped, total["right"], total["wrong"], total["refused"], total["accepted"], total["limited"],
               total["errors"], as.numeric(Sys.time() - start, units = "secs")))
