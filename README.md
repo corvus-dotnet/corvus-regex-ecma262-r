@@ -128,9 +128,16 @@ nightly on one runner with the engines of every other source.
 
 ## Releasing
 
-A release is a GitHub release tagged `v<version>`, the `Version` in `DESCRIPTION` (and the `version` in
-`src/rust/Cargo.toml`). R-universe builds the latest release (its registry entry names the branch `*release`), and
-the release publishes the harness image with the release's tag.
+Every merged pull request releases what it changed, unless it is labelled `no_release`. `auto-release.yml` runs
+`tools/release/release.ps1` on the merge commit: when the package changed since its last tag (`DESCRIPTION`,
+`NAMESPACE`, `R/`, `src/`, `configure` or `configure.win`), it makes a GitHub release tagged `v<version>` with the next
+patch version. `DESCRIPTION`, `src/rust/Cargo.toml` and `src/rust/Cargo.lock` hold `0.0.0` on main, and R-universe
+builds the package from the source at the latest release (its registry entry names the branch `*release`), so the tag
+is on a commit of the merge with the version written in (`tools/release/stamp.ps1`), which is on no branch. The release
+publishes the harness image with the release's tag. When only the harness changed (`Dockerfile`, `tools/bench/`,
+`tools/benchmarks/`), the release is `harness-<version>.<n>`, which publishes the image alone. A pull request that
+needs a minor or major version sets `nextVersion` in `.github/release.json` (a minor version is a breaking change). A
+pull request labelled `no_release` releases nothing, and its changes ship with the next release.
 
 ## Licence
 
