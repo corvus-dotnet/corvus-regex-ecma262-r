@@ -1,0 +1,47 @@
+{
+  "packages": [
+    {
+      "name": "corvusregexecma262",
+      "tag": "v",
+      "stampedTag": true,
+      "paths": [
+        "DESCRIPTION",
+        "NAMESPACE",
+        "R/",
+        "src/",
+        "configure",
+        "configure.win"
+      ],
+      "stamp": [
+        {
+          "file": "DESCRIPTION",
+          "placeholder": "Version: 0.0.0\n",
+          "with": "Version: {version}\n",
+          "count": 1
+        },
+        {
+          "file": "src/rust/Cargo.toml",
+          "placeholder": "version = \"0.0.0\"",
+          "with": "version = \"{version}\"",
+          "count": 1
+        },
+        {
+          "file": "src/rust/Cargo.lock",
+          "placeholder": "name = \"corvusregexecma262\"\nversion = \"0.0.0\"\n",
+          "with": "name = \"corvusregexecma262\"\nversion = \"{version}\"\n",
+          "count": 1
+        }
+      ]
+    },
+    {
+      "name": "harness",
+      "harnessOf": "corvusregexecma262",
+      "tag": "harness-",
+      "paths": [
+        "Dockerfile",
+        "tools/bench/",
+        "tools/benchmarks/"
+      ]
+    }
+  ]
+}
