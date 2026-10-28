@@ -33,18 +33,49 @@ checked <- function(value, call = sys.call(-1L)) {
   invisible()
 }
 
-ecma_regex <- function(pattern, flags = "", timeout = NULL) {
+ecma_regex <- function(pattern, flags = "", timeout = NULL, edition = "current", unicode_version = NULL) {
   if (inherits(pattern, "ecma_regex")) {
     return(pattern)
   }
   if (inherits(pattern, "ecma_utf16")) {
     stop("a pattern must be a string or a raw vector of UTF-8", call. = FALSE)
   }
-  ptr <- checked(.Call(native_crer_compile, pattern, flags, timeout_of(timeout)))
+  ptr <- checked(.Call(native_crer_compile, pattern, flags, timeout_of(timeout), edition_code(edition),
+                       unicode_version_code(unicode_version)))
   info <- .Call(native_crer_info, ptr)
   structure(ptr, source = info[[1L]], flags = info[[2L]], group_count = info[[3L]], group_names = info[[4L]],
-            timeout = if (is.na(info[[5L]])) NULL else info[[5L]], class = "ecma_regex")
+            timeout = if (is.na(info[[5L]])) NULL else info[[5L]], edition = info[[6L]], unicode_version = info[[7L]],
+            class = "ecma_regex")
 }
+
+# The native code of an edition: 0 for "current" (today's grammar), 1 for "es2020".
+edition_code <- function(edition) {
+  if (!is.character(edition) || length(edition) != 1L || is.na(edition) || !(edition %in% c("current", "es2020"))) {
+    stop("edition must be \"current\" or \"es2020\"", call. = FALSE)
+  }
+  if (edition == "es2020") 1L else 0L
+}
+
+# The native code of a version of Unicode: 0 for NULL (V8's), 13, 17 or 18 as themselves, -1 for "latest".
+unicode_version_code <- function(unicode_version) {
+  if (is.null(unicode_version)) {
+    return(0L)
+  }
+  if (identical(unicode_version, "latest")) {
+    return(-1L)
+  }
+  if (is.numeric(unicode_version) && length(unicode_version) == 1L && !is.na(unicode_version) &&
+      unicode_version %in% ecma_unicode_versions()) {
+    return(as.integer(unicode_version))
+  }
+  stop("unicode_version must be NULL, 13, 17, 18 or \"latest\"", call. = FALSE)
+}
+
+ecma_unicode_versions <- function() c(13L, 17L, 18L)
+
+ecma_default_unicode_version <- function() 17L
+
+ecma_latest_unicode_version <- function() 18L
 
 ecma_set_default_timeout <- function(seconds) {
   checked(.Call(native_crer_set_default_timeout, timeout_of(seconds)))
@@ -56,11 +87,11 @@ ecma_default_timeout <- function() {
   if (is.na(t)) NULL else t
 }
 
-ecma_valid <- function(pattern, flags = "") {
+ecma_valid <- function(pattern, flags = "", edition = "current", unicode_version = NULL) {
   if (is.raw(pattern)) {
     pattern <- list(pattern)
   }
-  checked(.Call(native_crer_valid, pattern, flags))
+  checked(.Call(native_crer_valid, pattern, flags, edition_code(edition), unicode_version_code(unicode_version)))
 }
 
 ecma_utf16 <- function(x) {

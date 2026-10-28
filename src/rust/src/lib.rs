@@ -193,6 +193,27 @@ fn limit_of(timeout: f64) -> Result<Option<Duration>> {
     }
 }
 
+/// The edition the R layer's code names: 0 today's grammar, 1 ECMAScript 2020's.
+unsafe fn edition_of(edition: SEXP) -> Result<ecma::Edition> {
+    match unsafe { INTEGER_ELT(edition, 0) } {
+        0 => Ok(ecma::Edition::Current),
+        1 => Ok(ecma::Edition::Es2020),
+        _ => Err(Failure::new("argument", "edition must be \"current\" or \"es2020\"")),
+    }
+}
+
+/// The version of Unicode the R layer's code names: 0 the default (V8's), 13, 17, 18, or -1 the latest.
+unsafe fn unicode_version_of(version: SEXP) -> Result<ecma::UnicodeVersion> {
+    match unsafe { INTEGER_ELT(version, 0) } {
+        0 => Ok(ecma::UnicodeVersion::Default),
+        13 => Ok(ecma::UnicodeVersion::V13),
+        17 => Ok(ecma::UnicodeVersion::V17),
+        18 => Ok(ecma::UnicodeVersion::V18),
+        -1 => Ok(ecma::UnicodeVersion::Latest),
+        _ => Err(Failure::new("argument", "unicode_version must be NULL, 13, 17, 18 or \"latest\"")),
+    }
+}
+
 /// Whether a byte is inside a character (not its first byte).
 #[inline(always)]
 fn inside(b: &[u8], at: usize) -> bool {
@@ -737,12 +758,13 @@ pub unsafe extern "C" fn crer_from_utf16(x: SEXP, as_raw: SEXP) -> SEXP {
 }
 
 /// Compiles a pattern (a string, or a raw vector of UTF-8) with a timeout in seconds (0 for none, NA for the
-/// default): an external pointer, or a failure.
+/// default), in the grammar of an edition and under a version of Unicode (the codes of edition_of and
+/// unicode_version_of): an external pointer, or a failure.
 ///
 /// # Safety
 /// The arguments are live R values.
 #[unsafe(no_mangle)]
-pub unsafe extern "C" fn crer_compile(pattern: SEXP, flags: SEXP, timeout: SEXP) -> SEXP {
+pub unsafe extern "C" fn crer_compile(pattern: SEXP, flags: SEXP, timeout: SEXP, edition: SEXP, version: SEXP) -> SEXP {
     entry(|| unsafe {
         check_strings(flags, "flags")?;
         if (TYPEOF(pattern) != RAWSXP && Rf_xlength(pattern) != 1) || Rf_xlength(flags) != 1 {
@@ -754,11 +776,12 @@ pub unsafe extern "C" fn crer_compile(pattern: SEXP, flags: SEXP, timeout: SEXP)
         let (Some(p), Some(f)) = (pattern_of(pattern)?, text_of(STRING_ELT(flags, 0))?) else {
             return Err(Failure::new("argument", "pattern and flags must not be NA"));
         };
-        let re = match limit_of(REAL_ELT(timeout, 0))? {
-            None => ecma::Regex::new(p, f),
-            Some(t) => ecma::Flags::parse(f).and_then(|f| ecma::Regex::with_timeout(p, f, Some(t))),
+        let mut builder = ecma::RegexBuilder::new(p);
+        builder.flags(f).edition(edition_of(edition)?).unicode_version(unicode_version_of(version)?);
+        if let Some(t) = limit_of(REAL_ELT(timeout, 0))? {
+            builder.match_timeout(Some(t));
         }
-        .map_err(compile_failure)?;
+        let re = builder.build().map_err(compile_failure)?;
         let names = re.group_names().map(String::from).collect();
         let ptr = Rf_protect(R_MakeExternalPtr(
             Box::into_raw(Box::new(Compiled { re, names })) as *mut c_void,
@@ -791,7 +814,7 @@ pub extern "C" fn crer_default_timeout() -> SEXP {
 }
 
 /// What a compiled pattern is: list(source (a raw vector of UTF-8 where it holds a NUL), flags, group count, names,
-/// timeout (NA for none)).
+/// timeout (NA for none), edition ("current" or "es2020"), version of Unicode (resolved)).
 ///
 /// # Safety
 /// The arguments are live R values.
@@ -799,7 +822,7 @@ pub extern "C" fn crer_default_timeout() -> SEXP {
 pub unsafe extern "C" fn crer_info(re: SEXP) -> SEXP {
     entry(|| unsafe {
         let c = compiled(re)?;
-        let list = Rf_protect(Rf_allocVector(VECSXP as c_uint, 5));
+        let list = Rf_protect(Rf_allocVector(VECSXP as c_uint, 7));
         let source = c.re.as_str();
         SET_VECTOR_ELT(
             list,
@@ -813,21 +836,28 @@ pub unsafe extern "C" fn crer_info(re: SEXP) -> SEXP {
         let names: Vec<&str> = c.names.iter().map(String::as_str).collect();
         SET_VECTOR_ELT(list, 3, string_vector(&names));
         SET_VECTOR_ELT(list, 4, Rf_ScalarReal(c.re.match_timeout().map_or(na_real(), |t| t.as_secs_f64())));
+        let edition = if c.re.edition() == ecma::Edition::Es2020 { "es2020" } else { "current" };
+        SET_VECTOR_ELT(list, 5, string_vector(&[edition]));
+        let version = Rf_allocVector(INTSXP as c_uint, 1);
+        SET_VECTOR_ELT(list, 6, version);
+        *INTEGER(version) = c.re.unicode_version().major() as c_int;
         Rf_unprotect(1);
         Ok(list)
     })
 }
 
 /// Whether each pattern (a character vector, or a list of strings and raw vectors) is valid with the flags
-/// (recycled): a logical vector, NA for NA.
+/// (recycled), in the grammar of an edition and under a version of Unicode (the codes of edition_of and
+/// unicode_version_of): a logical vector, NA for NA.
 ///
 /// # Safety
 /// The arguments are live R values.
 #[unsafe(no_mangle)]
-pub unsafe extern "C" fn crer_valid(patterns: SEXP, flags: SEXP) -> SEXP {
+pub unsafe extern "C" fn crer_valid(patterns: SEXP, flags: SEXP, edition: SEXP, version: SEXP) -> SEXP {
     entry(|| unsafe {
         check_texts(patterns, "pattern")?;
         check_strings(flags, "flags")?;
+        let (edition, version) = (edition_of(edition)?, unicode_version_of(version)?);
         let n = Rf_xlength(patterns);
         if n > 0 && Rf_xlength(flags) == 0 {
             return Err(Failure::new("argument", "flags must not be empty"));
@@ -841,7 +871,9 @@ pub unsafe extern "C" fn crer_valid(patterns: SEXP, flags: SEXP) -> SEXP {
                 pattern_of(VECTOR_ELT(patterns, i))
             };
             let r = match (p, text_of(element(flags, i))) {
-                (Ok(Some(p)), Ok(Some(f))) => ecma::Regex::is_valid(p, f) as c_int,
+                (Ok(Some(p)), Ok(Some(f))) => {
+                    ecma::Flags::parse(f).is_ok_and(|f| ecma::Regex::is_valid_with(p, f, edition, version)) as c_int
+                }
                 (Ok(None), _) | (_, Ok(None)) => NA_INTEGER,
                 (Err(e), _) | (_, Err(e)) => {
                     Rf_unprotect(1);

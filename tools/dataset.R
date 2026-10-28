@@ -2,7 +2,7 @@
 # judged by the data's own rule ("How a runner judges an engine" in its README) as the C library's runner judges it:
 #
 #   Rscript tools/dataset.R <data directory> <wrong-cases output file> [--files <glob>] [--workers N]
-#                           [--compliance <file>]
+#                           [--compliance <file>] [--edition current|es2020] [--unicode 13|17|18|latest]
 #
 # Each record is asked about under each grammar V8 found it valid in: the record's flags with u added (the unicode
 # answers), the record's flags alone (the legacy answers) and, in the file that has them, the flags with v added (the
@@ -22,6 +22,10 @@
 # record's flags from its lastIndex, right when the positions of the match and of every group, the named groups and,
 # with g or y, the lastIndex after are V8's; one answer over UTF-16 and, when the text holds no lone surrogate and
 # lastIndex is not between the halves of a pair, one over UTF-8, its positions compared as above.
+#
+# --edition and --unicode compile every pattern with that edition and version of Unicode, for the data as its own scripts
+# write it for them (edition.js apply and unicode.js apply in the data repository). Under es2020 a refusal of the d or v
+# flag is a refusal of the pattern, as the data's overlay counts it.
 #
 # With --compliance <file>, the engine's compliance object is written to the file, as the benchmark page reads it
 # (docs/implementing-a-source.md in corvus-regex-ecma262-benchmarks): the counts, this runner and the calls it makes in
@@ -205,11 +209,22 @@ same_text <- function(expected, got, encoding) {
 
 new_counts <- function() c(right = 0, wrong = 0, refused = 0, accepted = 0, limited = 0, errors = 0)
 
+# The edition and the version of Unicode every pattern is compiled with (--edition, --unicode); main sets them before
+# the workers are forked.
+SETTINGS <- list(edition = "current", unicode_version = NULL)
+
 compile_or_why <- function(pattern, flags) {
-  tryCatch(list(re = ecma_regex(pattern_arg(pattern), flags)), ecma_invalid_pattern = function(e) {
+  tryCatch(list(re = ecma_regex(pattern_arg(pattern), flags, edition = SETTINGS$edition,
+                                unicode_version = SETTINGS$unicode_version)), ecma_invalid_pattern = function(e) {
     list(message = paste("PARSE:", conditionMessage(e)), error = FALSE)
   }, ecma_pattern_too_large = function(e) {
     list(message = paste("TOO-LARGE:", conditionMessage(e)), error = FALSE)
+  }, ecma_invalid_flags = function(e) {
+    if (SETTINGS$edition == "es2020") {
+      list(message = paste("FLAGS:", conditionMessage(e)), error = FALSE)
+    } else {
+      list(message = paste("ERROR:", conditionMessage(e)), error = TRUE)
+    }
   }, error = function(e) {
     list(message = paste("ERROR:", conditionMessage(e)), error = TRUE)
   })
@@ -574,7 +589,8 @@ judge_lines <- function(name, lines) {
 
 main <- function(args) {
   if (length(args) < 2L) {
-    cat("usage: Rscript tools/dataset.R <data directory> <wrong-cases file> [--files glob] [--workers N] [--compliance file]\n")
+    cat("usage: Rscript tools/dataset.R <data directory> <wrong-cases file> [--files glob] [--workers N] [--compliance file]",
+        "[--edition current|es2020] [--unicode 13|17|18|latest]\n")
     quit(status = 2L)
   }
   data <- args[[1L]]
@@ -582,13 +598,19 @@ main <- function(args) {
   glob <- "*.jsonl"
   workers <- 4L
   compliance <- NULL
+  edition <- "current"
+  unicode <- NULL
   i <- 3L
   while (i < length(args)) {
     if (args[[i]] == "--files") glob <- args[[i + 1L]]
     if (args[[i]] == "--workers") workers <- as.integer(args[[i + 1L]])
     if (args[[i]] == "--compliance") compliance <- args[[i + 1L]]
+    if (args[[i]] == "--edition") edition <- args[[i + 1L]]
+    if (args[[i]] == "--unicode") unicode <- args[[i + 1L]]
     i <- i + 2L
   }
+  SETTINGS <<- list(edition = edition,
+                    unicode_version = if (is.null(unicode) || unicode == "latest") unicode else as.numeric(unicode))
   files <- sort(list.files(data, pattern = utils::glob2rx(glob)))
   files <- files[endsWith(files, ".jsonl")]
   # The exec calls of test262, in a directory of their own: with the default filter, or one that names them.
