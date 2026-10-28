@@ -24,7 +24,8 @@ Regular expressions with the grammar and the answers of ECMA-262, the `RegExp` o
 about its patterns and texts, test262's patterns and `exec` calls, the global search, `replace` and `split` among them,
 and texts of bytes that are not UTF-8, which it refuses), through this package over R's strings, raw vectors and
 `ecma_utf16` code units, it gives every answer the data asks right and none wrong, refuses no valid pattern, accepts no
-invalid one and reaches no limit. CI runs the whole data. (A text with a NUL, which an R string cannot hold, is asked as
+invalid one and reaches no limit. CI runs the whole data, and the data as its own scripts write it for Unicode 13 and
+18 and for the grammar of ECMAScript 2020. (A text with a NUL, which an R string cannot hold, is asked as
 a raw vector, and the answers over UTF-16 as code units.)
 
 ## Install
@@ -65,9 +66,9 @@ ecma_split("a ; b;c", "\\s*(;)\\s*")                         # list(c("a", ";", 
 
 | | |
 |---|---|
-| `ecma_regex(pattern, flags = "", timeout = NULL)` | Compiles a pattern as `new RegExp(pattern, flags)` does. `timeout` is the match timeout in seconds (0 for none; `NULL` for the default). |
+| `ecma_regex(pattern, flags = "", timeout = NULL, edition = "current", unicode_version = NULL)` | Compiles a pattern as `new RegExp(pattern, flags)` does. `timeout` is the match timeout in seconds (0 for none; `NULL` for the default). `edition` and `unicode_version` are below. |
 | `ecma_set_default_timeout(seconds)`, `ecma_default_timeout()` | The timeout of every pattern compiled without one: `NULL` (no limit) unless set. |
-| `ecma_valid(pattern, flags = "")` | Whether each pattern is valid, without compiling it. |
+| `ecma_valid(pattern, flags = "", edition = "current", unicode_version = NULL)` | Whether each pattern is valid, without compiling it. |
 | `ecma_test(x, regex, start = 1L, timeout = NULL)` | `RegExp.prototype.test` for each string, with `lastIndex` at `start` (at `start` alone with `y`). |
 | `ecma_match(x, regex, start = 1L, timeout = NULL)` | The first match in each string and what each group captured (`exec`): a character matrix. |
 | `ecma_locate(x, regex, group = 0L, start = 1L, timeout = NULL)` | Where the first match, or one of its groups, starts and ends: an integer matrix. |
@@ -79,6 +80,7 @@ ecma_split("a ; b;c", "\\s*(;)\\s*")                         # list(c("a", ";", 
 | `ecma_split(x, regex, limit = NULL)` | `String.prototype.split`: a list of character vectors. |
 | `ecma_utf16(x)` | The UTF-16 code units of a string or of a raw vector of UTF-8, or code units given as numbers: a text with JavaScript's code units, which every function takes. `as.character` and `as.raw` turn one back. |
 | `ecma_version()` | The package's and the crate's versions. |
+| `ecma_unicode_versions()`, `ecma_default_unicode_version()`, `ecma_latest_unicode_version()` | The versions of Unicode the package carries, `c(13L, 17L, 18L)`, the default (17) and the latest (18). |
 
 A match's row is the match, then each group, then one column for each group name (of the groups that share a name,
 the one that took part); `NA` is a group that did not take part. There is `NA` (or `NULL` in a list) for an `NA`
@@ -88,7 +90,25 @@ string.
 for every pattern compiled after it `ecma_set_default_timeout(1)`. Every function that matches gives each of its
 matches the timeout and raises `ecma_match_limit` at it; the single searches take a `timeout` of their own in its
 place. Without a timeout (the default) a match has no limit of time or of memory, so a program that matches a pattern
-or a text it did not write should set one.
+or a text it did not write should set one. There is no separate function that gives `NULL` for a pattern that is not
+valid: `tryCatch` on `ecma_regex`, which takes a timeout of its own, is that form, so a validator needs no default
+timeout.
+
+**The edition and the version of Unicode.** Two settings, each independent of the other, are settled when a pattern is
+compiled and cost a match nothing. A compiled pattern has them as the attributes `edition` and `unicode_version`.
+
+- `edition = "es2020"` reads the pattern with the grammar of ECMAScript 2020, which JSON Schema 2020-12 names. It
+  refuses what later editions added, and nothing else: the `d` and `v` flags (`ecma_invalid_flags`), modifier groups
+  such as `(?i:...)`, a group name used by two groups, and a property name or value that is not in that edition's
+  tables, such as `\p{Script=Yezidi}` (each `ecma_invalid_pattern`). A pattern it accepts has the same answers as in
+  today's grammar. `"current"`, the default, is today's grammar.
+- `unicode_version` is the version of Unicode whose tables the pattern is read with: the members of each `\p{...}`,
+  the characters of a group name, and case folding. It is `NULL` (the default: the version of the V8 the answers are
+  held to, 17 today), `13`, `17`, `18` or `"latest"` (18 today). The attribute gives the version it resolved to.
+
+```r
+schema <- ecma_regex("^\\p{L}+$", "u", timeout = 1, edition = "es2020", unicode_version = 13)
+```
 
 **Positions.** Positions are in characters from 1, as `nchar` counts them, an end inclusive, as `regexpr` gives them;
 an empty match ends one character before it starts. Without `u` or `v` a match can take half of a character beyond the

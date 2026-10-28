@@ -180,6 +180,96 @@ same(attr(own, "timeout"), 5)
 stopifnot(is.null(attr(none, "timeout")))
 raises(ecma_set_default_timeout(-1), "ecma_argument_error")
 
+# The edition and the version of Unicode: today's grammar and V8's Unicode by default, each resolved when the pattern
+# is compiled.
+a <- ecma_regex("a")
+same(attr(a, "edition"), "current")
+same(attr(a, "unicode_version"), 17L)
+same(ecma_default_unicode_version(), 17L)
+same(ecma_latest_unicode_version(), 18L)
+same(ecma_unicode_versions(), c(13L, 17L, 18L))
+for (asked in list(list(NULL, 17L), list(13, 13L), list(17L, 17L), list(18, 18L), list("latest", 18L))) {
+  same(attr(ecma_regex("a", unicode_version = asked[[1L]]), "unicode_version"), asked[[2L]])
+}
+for (bad in list(12, 19, "18", "default", c(13, 17), NA_real_)) {
+  raises(ecma_regex("a", unicode_version = bad), "error")
+  raises(ecma_valid("a", unicode_version = bad), "error")
+}
+raises(ecma_regex("a", edition = "es2022"), "error")
+raises(ecma_valid("a", edition = NA_character_), "error")
+
+# Each version has its own scripts.
+for (case in list(list("\\p{Script=Vithkuqi}", 13, FALSE), list("\\p{Script=Vithkuqi}", NULL, TRUE),
+                  list("\\p{Script=Yezidi}", 13, TRUE), list("\\p{Script=Jurchen}", NULL, FALSE),
+                  list("\\p{scx=Jurc}", 18, TRUE), list("\\p{Script=Jurchen}", "latest", TRUE))) {
+  same(ecma_valid(case[[1L]], "u", unicode_version = case[[2L]]), case[[3L]])
+  if (case[[3L]]) {
+    ecma_regex(case[[1L]], "u", unicode_version = case[[2L]])
+  } else {
+    raises(ecma_regex(case[[1L]], "u", unicode_version = case[[2L]]), "ecma_invalid_pattern")
+  }
+}
+
+# A property and case folding are the version's.
+letter <- "\U00010597"
+same(ecma_test(letter, ecma_regex("^\\p{Ll}$", "u")), TRUE)
+same(ecma_test(letter, ecma_regex("^\\p{Ll}$", "u", unicode_version = 13)), FALSE)
+same(ecma_test(letter, ecma_regex("\U00010570", "iu")), TRUE)
+same(ecma_test(letter, ecma_regex("\U00010570", "iu", unicode_version = 13)), FALSE)
+same(ecma_test("ꟁ", ecma_regex("Ꟁ", "i")), TRUE)
+same(ecma_test("ꟁ", ecma_regex("Ꟁ", "i", unicode_version = 13)), FALSE)
+
+# A case-insensitive backreference folds as its version folds, over a string and over UTF-16.
+for (case in list(c("iu", "\U00010570\U00010597"), c("i", "Ꟁꟁ"))) {
+  flags <- case[[1L]]
+  text <- case[[2L]]
+  twice <- strrep(substr(text, 1L, 1L), 2L)
+  for (pattern in c("(.)\\1", "(?<=\\1(.))", "(?:x|(.))+\\1$")) {
+    for (version in c(17, 18)) {
+      re <- ecma_regex(pattern, flags, unicode_version = version)
+      same(ecma_test(text, re), TRUE)
+      same(ecma_test(ecma_utf16(text), re), TRUE)
+    }
+    re <- ecma_regex(pattern, flags, unicode_version = 13)
+    same(ecma_test(text, re), FALSE)
+    same(ecma_test(ecma_utf16(text), re), FALSE)
+    same(ecma_test(twice, re), TRUE)
+  }
+}
+
+# The grammar of 2020 refuses what later editions added, and accepts what it had.
+for (case in list(c("(?i:a)", ""), c("(?-i:a)", "i"), c("(?s:.)", "u"), c("(?<a>x)|(?<a>y)", ""),
+                  c("(?<a>x)|(?<a>y)", "u"), c("\\p{Script=Yezidi}", "u"), c("\\p{sc=Vith}", "u"),
+                  c("\\p{Script_Extensions=Toto}", "u"))) {
+  raises(ecma_regex(case[[1L]], case[[2L]], edition = "es2020", unicode_version = "latest"), "ecma_invalid_pattern")
+  same(ecma_valid(case[[1L]], case[[2L]], edition = "es2020", unicode_version = "latest"), FALSE)
+  ecma_regex(case[[1L]], case[[2L]], unicode_version = "latest")
+}
+for (case in list(c("\\p{Script=Greek}", "u"), c("\\p{L}\\p{gc=Lu}\\p{Lowercase}", "u"), c("\\P{scx=Latn}", "iu"),
+                  c("\\p{Script=Yezidi}", ""), c("(?<a>x)(?<b>y)\\k<a>", "u"), c("(?<=a)(?<!b)", "s"),
+                  c("(?:i)", ""))) {
+  re <- ecma_regex(case[[1L]], case[[2L]], edition = "es2020", unicode_version = 13)
+  same(attr(re, "edition"), "es2020")
+  same(attr(re, "unicode_version"), 13L)
+}
+for (flags in c("d", "v", "dv", "gv")) {
+  raises(ecma_regex("a", flags, edition = "es2020"), "ecma_invalid_flags")
+  same(ecma_valid("a", flags, edition = "es2020"), FALSE)
+  ecma_regex("a", flags)
+}
+
+# The settings and a timeout go together; tryCatch on ecma_regex is the form that gives NULL for a pattern that is
+# not valid, and it needs no default timeout.
+re <- ecma_regex(never, "u", timeout = 0.03, edition = "es2020", unicode_version = 13)
+same(attr(re, "timeout"), 0.03)
+same(c(attr(re, "edition"), attr(re, "unicode_version")), c("es2020", "13"))
+raises(ecma_test(long, re), "ecma_match_limit")
+same(tryCatch(ecma_regex("(?i:a)", timeout = 0.03, edition = "es2020"), ecma_regex_error = function(e) NULL), NULL)
+ecma_set_default_timeout(0.03)
+settled <- ecma_regex("a", edition = "es2020", unicode_version = 18)
+ecma_set_default_timeout(NULL)
+same(attr(settled, "timeout"), 0.03)
+
 # Raw vectors: UTF-8 bytes, which may hold a NUL as an R string cannot. Positions are in bytes, and the texts of a
 # match are raw vectors.
 nul <- as.raw(c(0x61, 0x00, 0x62))
