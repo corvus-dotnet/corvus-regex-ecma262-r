@@ -1,8 +1,8 @@
 # Lint the native code; R CMD check the package on Linux, macOS and Windows, at the oldest R it supports, the current
-# release and (on Linux) R-devel; and run the ECMA-262 test data through it on Linux, as it is and as the data's own
-# scripts write it for Unicode 13 and 18 and for the grammar of ECMAScript 2020. The data is pinned to a commit; the
-# pass is 0 wrong answers, 0 refusals of a valid pattern, 0 acceptances of an invalid one and 0 matches at their
-# limit.
+# release and (on Linux) R-devel, and on Linux on arm64 at the current release; and run the ECMA-262 test data through
+# it on Linux, as it is and as the data's own scripts write it for Unicode 13 and 18 and for the grammar of ECMAScript
+# 2020. The data is pinned to a commit; the pass is 0 wrong answers, 0 refusals of a valid pattern, 0 acceptances of an
+# invalid one and 0 matches at their limit.
 name: ci
 on:
   push:
@@ -60,6 +60,8 @@ jobs:
         include:
         - os: ubuntu-latest
           r: 'devel'
+        - os: ubuntu-24.04-arm
+          r: 'release'
     env:
       R_KEEP_PKG_SOURCE: yes
     steps:
