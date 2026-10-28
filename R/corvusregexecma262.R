@@ -197,6 +197,18 @@ group_index <- function(regex, group) {
 }
 
 ecma_test <- function(x, regex, start = 1L, timeout = NULL) {
+  # The common call, a character vector against a compiled pattern, goes straight to the native code, which checks
+  # both: the R-level checks below cost a microsecond a call, which is the whole time of a cheap search. A result with
+  # a class is an error, or a pattern that is not compiled yet, for the full path.
+  if (is.character(x) && missing(start) && is.null(timeout)) {
+    value <- .Call(native_crer_first, regex, x, 1L, NA_real_, 0L)
+    if (!is.object(value)) {
+      return(value)
+    }
+    if (inherits(regex, "ecma_regex")) {
+      return(checked(value))
+    }
+  }
   regex <- as_regex(regex)
   x <- texts_of(x)
   checked(.Call(native_crer_first, regex, x, as.integer(start), timeout_of(timeout), 0L))
@@ -250,6 +262,16 @@ ecma_locate_all <- function(x, regex, group = 0L) {
 }
 
 ecma_count <- function(x, regex) {
+  # As ecma_test: a character vector against a compiled pattern goes straight to the native code.
+  if (is.character(x)) {
+    value <- .Call(native_crer_count, regex, x)
+    if (!is.object(value)) {
+      return(value)
+    }
+    if (inherits(regex, "ecma_regex")) {
+      return(checked(value))
+    }
+  }
   checked(.Call(native_crer_count, as_regex(regex), texts_of(x)))
 }
 
