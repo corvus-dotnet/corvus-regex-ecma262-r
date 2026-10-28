@@ -16,8 +16,10 @@ RUN apt-get update && apt-get install -y --no-install-recommends python3 git uti
     && rm -rf /var/lib/apt/lists/*
 COPY --from=node /usr/local/bin/node /usr/local/bin/node
 ENV CARGO_HOME=/usr/local/cargo RUSTUP_HOME=/usr/local/rustup PATH=/usr/local/cargo/bin:$PATH
-RUN curl -sSfL -o /tmp/rustup-init https://static.rust-lang.org/rustup/archive/1.29.2/x86_64-unknown-linux-gnu/rustup-init \
-    && echo "5be191e8c70a5007074254cb74d78dbfdd25cd5a61c27de7b8e5410122ec24f4  /tmp/rustup-init" | sha256sum -c - \
+RUN case "$(uname -m)" in x86_64) arch=x86_64 sum=5be191e8c70a5007074254cb74d78dbfdd25cd5a61c27de7b8e5410122ec24f4 ;; aarch64) arch=aarch64 sum=a9c168dbea81a84671c6b7a5c1795cb0eb699020110d107ddfca427bd797e697 ;; \
+        *) echo "no rustup-init is pinned for $(uname -m)"; exit 1 ;; esac \
+    && curl -sSfL -o /tmp/rustup-init "https://static.rust-lang.org/rustup/archive/1.29.2/$arch-unknown-linux-gnu/rustup-init" \
+    && echo "$sum  /tmp/rustup-init" | sha256sum -c - \
     && chmod +x /tmp/rustup-init && /tmp/rustup-init -y --profile minimal --default-toolchain 1.98.0 --no-modify-path && rm /tmp/rustup-init
 # jsonlite and stringi from a dated snapshot of CRAN (Posit's binaries for the base image's Ubuntu), not the
 # image's moving "latest": a new stringi brings a new ICU, which changes the ICU row's figures.
