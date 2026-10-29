@@ -153,6 +153,10 @@ raises(ecma_locate(long, timed), "ecma_match_limit")
 raises(ecma_match_all(long, timed), "ecma_match_limit")
 raises(ecma_locate_all(long, timed), "ecma_match_limit")
 raises(ecma_count(long, timed), "ecma_match_limit")
+# A condition from the direct path of a character vector names the call it came from, as the full path's does.
+for (e in list(condition_of(ecma_count(long, timed)), condition_of(ecma_test(long, timed)))) {
+  stopifnot(as.character(conditionCall(e)[[1L]]) %in% c("ecma_count", "ecma_test"), identical(deparse(conditionCall(e)[[2L]]), "long"))
+}
 raises(ecma_replace(long, timed, "x"), "ecma_match_limit")
 raises(ecma_replace_all(long, timed, "x"), "ecma_match_limit")
 raises(ecma_replace(long, timed, function(m) "x"), "ecma_match_limit")
