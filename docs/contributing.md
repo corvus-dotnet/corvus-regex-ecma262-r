@@ -39,8 +39,8 @@ Every command runs from the repository root.
 1. **The native code.** From `src/rust`: `cargo +1.98.0 fmt --check`, `cargo +1.98.0 clippy --all-targets --locked --
    -D warnings` and `cargo test --locked` must pass. `Cargo.toml`'s `rust-version` must be the rustc named in
    `DESCRIPTION`'s SystemRequirements.
-2. **The check.** `R CMD build .`, then `R CMD check --no-manual corvusregexecma262_*.tar.gz` must give no warning and
-   must run the tests.
+2. **The check.** `R CMD build .`, then `R CMD check --no-manual corvusregexecma262_*.tar.gz` must run the tests and
+   give no warning (but the one R 4.2's linker on Windows gives for every Rust object).
 3. **Install.** `MAKEFLAGS=-j4 R CMD INSTALL .` installs the package for the steps that follow.
 4. **The getting-started page's examples.** `Rscript tools/docs/run-getting-started.R` runs each block of the page.
 5. **The test data.** `Rscript -e 'install.packages("jsonlite")'` once, then
