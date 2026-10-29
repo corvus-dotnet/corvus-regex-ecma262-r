@@ -134,6 +134,8 @@ jobs:
       run: |
         Rscript -e 'install.packages("jsonlite")'
         MAKEFLAGS=-j4 R CMD INSTALL .
+    - name: The getting-started page's examples
+      run: Rscript tools/docs/run-getting-started.R
     - name: Run the ECMA-262 test data
       run: Rscript tools/dataset.R ecma262-regex-test-data/data wrong-cases.tsv
     - uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0

@@ -10,7 +10,11 @@
         "R/",
         "src/",
         "configure",
-        "configure.win"
+        "configure.win",
+        "docs/getting-started.md",
+        "docs/api.md",
+        "docs/design.md",
+        "docs/contributing.md"
       ],
       "stamp": [
         {

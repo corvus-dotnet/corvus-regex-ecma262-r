@@ -6,6 +6,7 @@
 ^.*\.Rcheck$
 ^.*\.tar\.gz$
 ^tools$
+^docs$
 ^Dockerfile$
 ^\.dockerignore$
 ^\.github$
