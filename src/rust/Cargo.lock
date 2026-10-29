@@ -23,7 +23,7 @@ dependencies = [
 
 [[package]]
 name = "corvusregexecma262"
-version = "0.0.0"
+version = "0.2.4"
 dependencies = [
  "corvus-regex-ecma262",
  "simdutf8",
